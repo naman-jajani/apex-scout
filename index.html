@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APEX SCOUT - Premium Transfer Intelligence & Tactical Fit Engine</title>
+  <meta name="description" content="AI-driven football scouting platform, tactical formation matching, and player profile visualizer with heatmaps and radar charts.">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Chart.js CDN for interactive charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Premium Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">A</div>
+      <div class="brand-text">
+        <h1>APEX SCOUT</h1>
+        <p>Tactical Transfer Intelligence</p>
+      </div>
+    </div>
+    <div class="stats-summary-bar">
+      <div class="summary-pill" id="totalPlayersPill">Database: <span>441 Profiles</span></div>
+      <div class="summary-pill" id="aiStatusPill">AI Engine: <span style="color: #06b6d4;">Online</span></div>
+    </div>
+      <div class="api-key-container">
+        <button id="btnToggleApiKey" class="btn-sync" style="padding: 0.3rem 0.7rem; font-size: 0.7rem; border-radius: 8px;">⚙️ LLM Key</button>
+        <div id="apiKeyPanel" style="display:none; position:absolute; top:100%; right:0; margin-top:0.5rem; background:rgba(13,19,33,0.95); border:1px solid var(--border-glass); border-radius:12px; padding:1rem; z-index:999; min-width:320px; backdrop-filter:blur(12px); box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+          <label style="font-size:0.7rem; text-transform:uppercase; color:var(--text-muted); font-weight:700; letter-spacing:0.5px; display:block; margin-bottom:0.4rem;">Groq API Key (Free)</label>
+          <input type="password" id="groqApiKeyInput" class="form-input" style="width:100%; font-size:0.8rem; padding:0.5rem 0.8rem; margin-bottom:0.5rem;" placeholder="gsk_...">
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <button id="btnSaveApiKey" class="btn-ai" style="padding:0.35rem 0.8rem; font-size:0.75rem; border-radius:8px;">Save Key</button>
+            <span id="apiKeyStatus" style="font-size:0.7rem; color:var(--text-muted);"></span>
+          </div>
+          <p style="font-size:0.65rem; color:var(--text-dim); margin-top:0.5rem;">Free key from <a href="https://console.groq.com" target="_blank" style="color:var(--accent-cyan);">console.groq.com</a> — Uses Llama 3.3 70B</p>
+        </div>
+      </div>
+  </header>
+
+  <!-- App Layout Container -->
+  <div class="app-container">
+
+    <!-- Left Column: Controls & Filters -->
+    <aside class="sidebar">
+
+      <!-- Basic filters panel -->
+      <div class="glass-panel">
+        <h3 class="sidebar-title">
+          <svg style="width:18px;height:18px;vertical-align:middle;margin-right:4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 3m0-3a2 2 0 110 3m-9 0h3m2 0h11m0 4v2m0-2a2 2 0 100 3m0-3a2 2 0 110 3m-6 0h6m-8 0H3m12 4v2m0-2a2 2 0 100 3m0-3a2 2 0 110 3m-9 0h9m-11 0h2"></path></svg>
+          Scout Filter
+        </h3>
+        
+        <div class="form-group">
+          <label for="filterPosition">Target Position</label>
+          <select id="filterPosition" class="form-select">
+            <option value="ALL">All Positions</option>
+            <option value="FW">Forwards (FW)</option>
+            <option value="MF">Midfielders (MF)</option>
+            <option value="DF">Defenders (DF)</option>
+            <option value="GK">Goalkeepers (GK)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="filterAgeRange">Maximum Age</label>
+          <input type="range" id="filterAgeRange" class="slider" min="20" max="38" value="38">
+          <div class="range-values">
+            <span>20 years</span>
+            <span id="ageRangeVal">38 years</span>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:1.5rem;">
+          <label for="filterBudget">Max Market Value</label>
+          <input type="range" id="filterBudget" class="slider" min="10" max="200" value="200">
+          <div class="range-values">
+            <span>€10M</span>
+            <span id="budgetVal">€200M</span>
+          </div>
+        </div>
+
+        <!-- Apply Filters Button -->
+        <button id="btnApplyFilters" class="btn-ai" style="width: 100%; font-weight:700;">Apply Filters</button>
+      </div>
+
+      <!-- AI Tactical Filter Panel -->
+      <div class="glass-panel tactical-selector">
+        <h3 class="sidebar-title" style="color: var(--accent-cyan);">
+          <svg style="width:18px;height:18px;vertical-align:middle;margin-right:4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A2 2 0 013 15.382V6.618a2 2 0 011.053-1.789L9 2l5.447 2.724A2 2 0 0115 6.618v8.764a2 2 0 01-1.053 1.789L9 20z"></path></svg>
+          AI Tactical Fit
+        </h3>
+        
+        <div class="form-group">
+          <label for="selectFormation">Formation Model</label>
+          <select id="selectFormation" class="form-select">
+            <option value="4-3-3">4-3-3 Offensive Pressing</option>
+            <option value="4-2-3-1">4-2-3-1 Modern Block</option>
+            <option value="3-5-2">3-5-2 Wingback Counter</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Position Role Requirement</label>
+          <div class="role-badge-list" id="roleBadgeList">
+            <!-- Rendered dynamically depending on selected formation -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Sync Console -->
+      <div class="glass-panel">
+        <h3 class="sidebar-title">
+          <svg style="width:18px;height:18px;vertical-align:middle;margin-right:4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H17"></path></svg>
+          Scraper Console
+        </h3>
+        <div class="data-sync-panel">
+          <div class="sync-status-indicator">
+            <span>Sources: FBref, FPL API</span>
+            <span><span class="status-dot"></span> Sync'd</span>
+          </div>
+          <div id="scraperConsole" class="console-output">
+            <div class="console-line success">[INIT] Analytics engine loaded.</div>
+            <div class="console-line info">[ONLINE] 441 player profiles sync'd from PL api.</div>
+          </div>
+          <button id="btnTriggerScraper" class="btn-sync">Trigger Open Source Sync</button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Right Column: Dashboard Main Content -->
+    <main class="main-content">
+
+      <!-- Tab Navigation -->
+      <div class="tab-nav" style="display: flex; gap: 1.5rem; margin-bottom: 0px; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.6rem;">
+        <button id="btnTabGrid" class="btn-tab active">Scouting Grid</button>
+        <button id="btnTabChat" class="btn-tab">AI Scout Advisor</button>
+      </div>
+
+      <!-- Scouting Grid View Wrapper -->
+      <div id="gridViewWrapper">
+        <!-- Top Dashboard Filters & Search -->
+        <div class="dashboard-topbar" style="margin-bottom: 1.5rem; margin-top: 1rem;">
+          <div class="search-container">
+            <input type="text" id="dashboardSearch" class="search-input" placeholder="Search by player, club, league or nationality...">
+            <svg class="search-icon" style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <div class="form-group" style="margin-bottom:0; min-width: 180px;">
+            <select id="sortBy" class="form-select" style="padding: 0.65rem 1rem;">
+              <option value="rating">Sort by: Rating</option>
+              <option value="value">Sort by: Market Value</option>
+              <option value="age">Sort by: Age</option>
+              <option value="matchScore" id="sortByMatchOption" style="display:none;">Sort by: AI Match Score</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- AI-Powered Scouting Query Bar -->
+        <div id="aiQueryBar" class="glass-panel" style="margin-bottom:1rem; padding:0.8rem 1.2rem; display:flex; gap:0.8rem; align-items:center; border:1px solid rgba(6,182,212,0.2);">
+          <div style="display:flex; align-items:center; gap:0.5rem; flex-shrink:0;">
+            <span style="font-size:1.1rem;">🤖</span>
+            <span style="font-size:0.7rem; text-transform:uppercase; font-weight:700; color:var(--accent-cyan); letter-spacing:0.5px;">AI Scout</span>
+          </div>
+          <input type="text" id="aiGridQuery" class="form-input" style="flex:1; border-radius:10px; background:rgba(0,0,0,0.4); padding:0.55rem 1rem; font-size:0.85rem;" placeholder="Describe the player you need... e.g. 'creative midfielder under 22 with high work rate'">
+          <button id="btnAIGridSearch" class="btn-ai" style="padding:0.55rem 1.2rem; border-radius:10px; white-space:nowrap; font-weight:700;">Scout with AI</button>
+          <button id="btnClearAISearch" class="btn-sync" style="padding:0.55rem 0.8rem; border-radius:10px; display:none; white-space:nowrap; font-size:0.75rem;">✕ Clear</button>
+        </div>
+        <!-- AI Results Banner (shown when AI search is active) -->
+        <div id="aiResultsBanner" style="display:none; margin-bottom:1rem; padding:1rem 1.2rem; background:linear-gradient(135deg, rgba(6,182,212,0.08), rgba(16,185,129,0.08)); border:1px solid rgba(6,182,212,0.2); border-radius:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <h4 style="font-size:0.8rem; text-transform:uppercase; color:var(--accent-cyan); font-weight:700; margin-bottom:0.4rem;">🤖 AI Scouting Analysis</h4>
+              <p id="aiResultsSummary" style="font-size:0.85rem; color:var(--text-main); line-height:1.5;"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Player grid -->
+        <section class="player-grid" id="playerGrid">
+          <!-- Rendered dynamically by app.js -->
+        </section>
+      </div>
+
+      <!-- AI Scout Chat Advisor Wrapper -->
+      <div id="chatViewWrapper" style="display: none; height: calc(100vh - 180px); flex-direction: column;" class="glass-panel">
+        <div style="padding: 0.5rem 0.5rem 1rem 0.5rem; border-bottom: 1px solid var(--border-glass); display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <h3 style="font-family: var(--font-display); font-weight: 700; color: var(--accent-neon); font-size: 1.2rem;">🤖 AI Scout Advisor</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted);">Conversational scouting assistant. Inquire about profiles or shortlist parameters.</p>
+          </div>
+          <button id="btnClearChat" class="btn-sync" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.75rem;">Clear History</button>
+        </div>
+        
+        <!-- Chat History Scrollbox -->
+        <div id="chatHistory" style="flex: 1; overflow-y: auto; padding: 1.5rem 0.5rem; display: flex; flex-direction: column; gap: 1rem;">
+          <!-- Welcome message -->
+          <div class="chat-msg bot">
+            <div class="chat-bubble">
+              <h3>Welcome to AI Scout Advisor</h3>
+              <p>I have access to statistics and attributes for all 441 active Premier League players. You can ask me to compile shortlists, analyze players, or compare profiles.</p>
+              <p style="margin-top: 0.6rem; font-weight: 600; font-size:0.8rem; color: var(--accent-cyan); text-transform:uppercase; letter-spacing:0.5px;">Scouting Queries to Try:</p>
+              <div class="chat-prompt-chips" id="chatChipsContainer">
+                <span class="prompt-chip" data-prompt="I am looking for a number 8 sort of midfielder, who is creative and can set the rhythm of the game, and is also a work horse. I want a player aged less than 20.">"Creative midfielder under 20..."</span>
+                <span class="prompt-chip" data-prompt="Show me young forwards under 23 who are fast and have high goals per 90">"Young fast forwards..."</span>
+                <span class="prompt-chip" data-prompt="Why is Cole Palmer rated highly?">"Why is Cole Palmer rated highly?"</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Chat Input -->
+        <div style="padding: 1rem 0 0 0; border-top: 1px solid var(--border-glass); display: flex; gap: 0.8rem;">
+          <input type="text" id="chatInput" class="form-input" style="flex: 1; border-radius: 12px; background: rgba(0,0,0,0.4);" placeholder="Describe the type of player you need, or ask about a specific player...">
+          <button id="btnSendChat" class="btn-ai" style="width: 120px; border-radius: 12px;">Send</button>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- Detailed Player Profile Modal Overlay -->
+  <div class="modal-overlay" id="profileModal">
+    <div class="modal-content">
+      
+      <!-- Modal Header -->
+      <div class="modal-header" style="position: relative;">
+        <div class="modal-player-meta">
+          <div class="player-big-avatar" id="modalPlayerAvatar">EH</div>
+          <div class="player-hero-text">
+            <h2 id="modalPlayerName">Erling Haaland</h2>
+            <p id="modalPlayerPosition">Forward (FW) • Poacher / Target Man</p>
+          </div>
+        </div>
+        
+        <!-- Searchable Comparison Selector -->
+        <div class="compare-selector-container" style="margin-left: auto; margin-right: 3.5rem; display: flex; align-items: center; gap: 0.5rem; position: relative;">
+          <label style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); font-weight:700; letter-spacing:0.5px; white-space: nowrap;">Compare with:</label>
+          <div class="custom-compare-dropdown" style="position: relative; width: 220px;">
+            <input type="text" id="compareSearchInput" class="form-input" style="padding: 0.45rem 0.8rem; font-size: 0.8rem; background:rgba(0,0,0,0.5); border-radius: 8px; width: 100%; border: 1px solid var(--border-glass);" placeholder="Search player to compare..." autocomplete="off">
+            <div id="compareDropdownList" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; max-height: 220px; overflow-y: auto; background: rgba(13, 19, 33, 0.95); border: 1px solid var(--border-glass); border-radius: 8px; z-index: 1000; box-shadow: 0 8px 32px rgba(0,0,0,0.6); backdrop-filter: blur(8px);">
+              <!-- Option list items loaded here -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Close button - absolutely positioned to always be accessible -->
+        <button class="modal-close-btn" id="modalCloseBtn" title="Close profile (Esc)">&times;</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="modal-body">
+        
+        <!-- Modal Left: Attributes Radar, Strengths/Weaknesses -->
+        <div class="modal-left">
+          
+          <div class="player-detailed-meta-grid" id="modalPlayerMetaGrid">
+            <div class="meta-item">
+              <span class="meta-label">Club</span>
+              <span class="meta-val" id="modalPlayerClub">Manchester City</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">League</span>
+              <span class="meta-val" id="modalPlayerLeague">Premier League</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Age</span>
+              <span class="meta-val" id="modalPlayerAge">25 years</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Market Value</span>
+              <span class="meta-val" id="modalPlayerValue" style="color: var(--accent-cyan); font-weight:700;">€180M</span>
+            </div>
+            <div class="meta-item" style="grid-column: span 2;">
+              <span class="meta-label">Nationality</span>
+              <span class="meta-val" id="modalPlayerNation">Norway</span>
+            </div>
+          </div>
+
+          <!-- Radar Chart Box -->
+          <div class="glass-panel" style="padding:1rem;">
+            <h4 id="radarChartTitle" style="font-size:0.8rem;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.8rem;font-weight:700;">Tactical Rating Profile</h4>
+            <div class="chart-box">
+              <canvas id="radarChart"></canvas>
+            </div>
+          </div>
+
+          <!-- Strengths / Weaknesses -->
+          <div class="strengths-weaknesses" id="modalSWHolder">
+            <div class="glass-panel" style="padding:1rem;">
+              <h4 id="strengthsTitle" style="font-size:0.8rem;text-transform:uppercase;color:var(--accent-neon);margin-bottom:0.6rem;font-weight:700;">Key Strengths</h4>
+              <ul class="sw-list" id="modalPlayerStrengths">
+                <!-- Strengths -->
+              </ul>
+            </div>
+            <div class="glass-panel" style="padding:1rem;">
+              <h4 id="weaknessesTitle" style="font-size:0.8rem;text-transform:uppercase;color:var(--accent-red);margin-bottom:0.6rem;font-weight:700;">Key Weaknesses</h4>
+              <ul class="sw-list" id="modalPlayerWeaknesses">
+                <!-- Weaknesses -->
+              </ul>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Modal Right: Heatmap Canvas, Percentiles comparative stats, AI Suitability score -->
+        <div class="modal-right">
+          
+          <div class="section-grid">
+            
+            <!-- Heatmap canvas card -->
+            <div class="section-card">
+              <h4 class="section-card-title">
+                Interactive Heatmap
+                <span id="heatmapStatus">Positional Concentration</span>
+              </h4>
+              <div class="pitch-container">
+                <!-- Markings drawn via css -->
+                <div class="pitch-overlay-lines"></div>
+                <div class="pitch-midline"></div>
+                <div class="pitch-center-circle"></div>
+                <div class="pitch-penalty-box-top"></div>
+                <div class="pitch-penalty-box-bottom"></div>
+                <!-- Heatmap renderer -->
+                <canvas id="pitchCanvas" class="pitch-canvas"></canvas>
+              </div>
+              <div id="heatmapLegend" class="comparison-legends" style="display:none; margin-top:0.4rem; justify-content:center;">
+                <div class="legend-item"><span class="legend-dot" style="background:rgba(239, 68, 68, 0.8);"></span> Player A</div>
+                <div class="legend-item"><span class="legend-dot" style="background:rgba(6, 182, 212, 0.8);"></span> Player B</div>
+              </div>
+            </div>
+
+            <!-- Percentile comparative stat card -->
+            <div class="section-card">
+              <h4 class="section-card-title">
+                Relative League Standings
+                <span id="leagueComparisonSub">Vs. League Average</span>
+              </h4>
+              <div class="league-comparison-list" id="leagueComparisonContainer">
+                <!-- Dynamically drawn horizontal percentiles -->
+              </div>
+              <div class="comparison-legends">
+                <div class="legend-item"><span class="legend-dot player"></span> Player A</div>
+                <div class="legend-item" id="legendPlayerB" style="display:none;"><span class="legend-dot player-b" style="background: linear-gradient(90deg, var(--accent-cyan), #67e8f9);"></span> Player B</div>
+                <div class="legend-item"><span class="legend-dot avg"></span> League Avg</div>
+                <div class="legend-item"><span class="legend-dot elite"></span> Elite Tier</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- AI Tactical Fit Assessment Card -->
+          <div class="section-card glass-panel ai-fit-card" style="margin-top:0.5rem;">
+            <h4 class="section-card-title" style="color:var(--accent-cyan);margin-bottom:0.6rem;">
+              AI Tactical Assessment
+              <span>Powered by Apex Scout AI</span>
+            </h4>
+            
+            <div class="fit-headline-block">
+              <div>
+                <span class="fit-system-label" id="modalFitSystem">4-3-3 Offensive</span>
+                <div class="fit-rating-text" id="modalFitRating">Player A: Elite Fit</div>
+              </div>
+              <div style="display:flex; gap:0.6rem;">
+                <div class="fit-circle-score" id="modalFitScore" title="Player A Score">91%</div>
+                <div class="fit-circle-score" id="modalCompareFitScore" title="Player B Score" style="border-color: var(--accent-cyan); color: var(--accent-cyan); display: none;">78%</div>
+              </div>
+            </div>
+
+            <p class="ai-narrative-text" id="modalFitNarrative">
+              <!-- Assessment narrative -->
+            </p>
+
+            <div class="fit-bullets-grid">
+              <div class="fit-bullet-box pros">
+                <h5>Tactical Advantages</h5>
+                <ul class="sw-list" id="modalFitPros" style="font-size:0.8rem; line-height:1.4;">
+                  <!-- Dynamic Pros -->
+                </ul>
+              </div>
+              <div class="fit-bullet-box cons">
+                <h5>Tactical Risks</h5>
+                <ul class="sw-list" id="modalFitCons" style="font-size:0.8rem; line-height:1.4;">
+                  <!-- Dynamic Cons -->
+                </ul>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Loading scripts -->
+  <script src="data.js"></script>
+  <script src="ai.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Dev-only files
+server.py
+validate.py
+test_groq.py
+.DS_Store
+*.pyc
+__pycache__/
