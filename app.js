@@ -97,7 +97,9 @@ function hasApiKey() {
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
-const SCOUT_SYSTEM_PROMPT = `You are APEX SCOUT AI, an elite football transfer intelligence system. You have deep expertise in player analysis, tactical systems, and scouting.
+const SCOUT_SYSTEM_PROMPT = `You are APEX SCOUT AI, an elite football transfer intelligence system. You have deep expertise in player analysis, tactical systems, and scouting across all major leagues worldwide.
+
+You have access to a player database spanning 8 top-flight leagues: Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga (Portugal), Brasileirão, and Argentine Primera División.
 
 When given a scouting query and a database of player profiles, you must:
 1. Carefully analyze each player against ALL criteria in the query (position, age, playstyle, attributes, tactical role, etc.)
@@ -130,7 +132,7 @@ Return ONLY valid JSON in this exact format (no markdown, no code blocks):
 
 const CHAT_SYSTEM_PROMPT = `You are APEX SCOUT AI, a conversational football scouting assistant. You help scouts find players, analyze profiles, and build shortlists.
 
-You have access to a database of Premier League players. When the user asks about finding players, analyze the provided player data and recommend the best matches.
+You have access to a database spanning 8 top-flight leagues worldwide: Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga (Portugal), Brasileirão, and Argentine Primera División. When the user asks about finding players, analyze the provided player data and recommend the best matches from ANY league unless they specify one.
 
 RESPONSE FORMAT:
 - Use markdown formatting for readability
@@ -149,8 +151,9 @@ When recommending players, also include a JSON block at the very end of your res
 This hidden data helps the UI display the shortlist. Only include this when you are recommending specific players.`;
 
 // ── Compact Player Summary Builder (for LLM context) ─────────────
+// Tier 1: Full detail summaries for top candidates
 function buildPlayerSummaries(players) {
-  return players.slice(0, 35).map(p => {
+  return players.slice(0, 50).map(p => {
     const ds = p.detailedStats || {};
     const s = {
       id: p.id, name: p.name, age: p.age, pos: p.position, role: p.role,
@@ -173,10 +176,52 @@ function buildPlayerSummaries(players) {
   });
 }
 
+// Tier 2: Ultra-compact index for remaining players (one-liner per player)
+function buildPlayerIndex(players, startIdx) {
+  return players.slice(startIdx, startIdx + 500).map(p =>
+    `${p.id}|${p.name}|${p.age}|${p.position}|${p.club}|${p.league}|${p.rating}|${Math.round(p.value/1000000)}M`
+  );
+}
+
+// ── Pre-filter players for LLM context ────────────────────────────
+function getPreFilteredForLLM(query) {
+  const reqs = parseAISearch(query);
+  let candidates = PLAYER_DATABASE.filter(p => {
+    if (reqs.targetLeague && p.league !== reqs.targetLeague) return false;
+    if (reqs.strictPosition && reqs.targetPosition && p.position !== reqs.targetPosition) return false;
+    if (reqs.strictAge && reqs.maxAge && p.age >= reqs.maxAge) return false;
+    if (reqs.strictAge && reqs.minAge && p.age <= reqs.minAge) return false;
+    if (reqs.maxValue && p.value > reqs.maxValue) return false;
+    return true;
+  });
+  // If too few after strict filter, relax position but keep league
+  if (candidates.length < 15) {
+    candidates = PLAYER_DATABASE.filter(p => {
+      if (reqs.targetLeague && p.league !== reqs.targetLeague) return false;
+      if (reqs.targetPosition && p.position !== reqs.targetPosition) return false;
+      return true;
+    });
+  }
+  // If still too few, relax everything
+  if (candidates.length < 15) {
+    candidates = PLAYER_DATABASE.filter(p => {
+      if (reqs.targetPosition && p.position !== reqs.targetPosition) return false;
+      return true;
+    });
+  }
+  candidates.sort((a, b) => b.rating - a.rating);
+  return candidates;
+}
+
 // ── Direct Groq API Callers (browser → Groq, no server needed) ───
 async function callScoutAPI(query, players) {
   const summaries = buildPlayerSummaries(players);
-  const userMsg = `SCOUTING QUERY: "${query}"\n\nPLAYER DATABASE (${summaries.length} candidates):\n${JSON.stringify(summaries)}\n\nAnalyze these players against the scouting query. Return your ranked recommendations as JSON.`;
+  const index = buildPlayerIndex(players, 50);
+  let userMsg = `SCOUTING QUERY: "${query}"\n\nDETAILED PROFILES (${summaries.length} top candidates):\n${JSON.stringify(summaries)}`;
+  if (index.length > 0) {
+    userMsg += `\n\nADDITIONAL PLAYERS INDEX (${index.length} more, format: id|name|age|pos|club|league|rating|value):\n${index.join('\n')}`;
+  }
+  userMsg += `\n\nTotal pool: ${players.length} players. Analyze against the scouting query. Return your ranked recommendations as JSON.`;
 
   const res = await fetch(GROQ_API_URL, {
     method: 'POST',
@@ -246,28 +291,15 @@ async function callChatAPI(query, players, history) {
   return { text: data.choices[0].message.content };
 }
 
-// ── Pre-filter players for LLM context ────────────────────────────
-function getPreFilteredForLLM(query) {
-  const reqs = parseAISearch(query);
-  let candidates = PLAYER_DATABASE.filter(p => {
-    if (reqs.strictPosition && reqs.targetPosition && p.position !== reqs.targetPosition) return false;
-    if (reqs.strictAge && reqs.maxAge && p.age >= reqs.maxAge) return false;
-    if (reqs.strictAge && reqs.minAge && p.age <= reqs.minAge) return false;
-    if (reqs.maxValue && p.value > reqs.maxValue) return false;
-    return true;
-  });
-  if (candidates.length < 10) {
-    candidates = PLAYER_DATABASE.filter(p => {
-      if (reqs.targetPosition && p.position !== reqs.targetPosition) return false;
-      return true;
-    });
-  }
-  candidates.sort((a, b) => b.rating - a.rating);
-  return candidates.slice(0, 35);
-}
+
 
 // Init App
 window.addEventListener("DOMContentLoaded", () => {
+  // Update dynamic stats
+  const leagues = new Set(PLAYER_DATABASE.map(p => p.league));
+  const countSpan = document.getElementById('playerCountSpan');
+  if (countSpan) countSpan.textContent = `${PLAYER_DATABASE.length} Players · ${leagues.size} Leagues`;
+  
   renderFormationRoles();
   renderPlayers();
   
@@ -496,10 +528,11 @@ function renderFormationRoles() {
 function renderPlayers() {
   const query = dashboardSearch.value;
   const position = filterPosition.value;
+  const league = document.getElementById('filterLeague') ? document.getElementById('filterLeague').value : 'ALL';
   const maxAge = parseInt(filterAgeRange.value);
   const maxVal = parseInt(filterBudget.value) * 1000000;
   
-  let filtered = getPlayersFiltered({ position, maxAge, maxVal, query });
+  let filtered = getPlayersFiltered({ position, league, maxAge, maxVal, query });
   
   let displayList = filtered.map(player => {
     let matchScore = null;

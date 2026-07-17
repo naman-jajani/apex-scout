@@ -321,11 +321,23 @@ function parseAISearch(prompt) {
     weightAdjust.workrate = 3.0;
   }
 
+  // League/country keywords
+  let targetLeague = null;
+  if (q.includes('premier league') || q.includes('english') || q.includes('epl')) targetLeague = 'Premier League';
+  else if (q.includes('la liga') || q.includes('spanish') || q.includes('spain') || q.includes('liga')) targetLeague = 'La Liga';
+  else if (q.includes('bundesliga') || q.includes('german')) targetLeague = 'Bundesliga';
+  else if (q.includes('serie a') || q.includes('italian') || q.includes('italy') || q.includes('calcio')) targetLeague = 'Serie A';
+  else if (q.includes('ligue 1') || q.includes('french') || q.includes('france')) targetLeague = 'Ligue 1';
+  else if (q.includes('portug') || q.includes('primeira liga') || q.includes('liga portugal')) targetLeague = 'Primeira Liga';
+  else if (q.includes('brazil') || q.includes('brasileiro') || q.includes('brasileir')) targetLeague = 'Brasileirão';
+  else if (q.includes('argentin') || q.includes('primera division')) targetLeague = 'Argentine Primera';
+
   return {
     targetPosition,
     minAge,
     maxAge,
     maxValue,
+    targetLeague,
     strictAge,
     strictPosition,
     weightAdjust,
