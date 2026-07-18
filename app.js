@@ -253,6 +253,7 @@ async function callScoutAPI(query, players) {
 
 async function callChatAPI(query, players, history) {
   const summaries = buildPlayerSummaries(players);
+  const index = buildPlayerIndex(players, 50);
   const messages = [{ role: 'system', content: CHAT_SYSTEM_PROMPT }];
 
   // Add conversation history (last 6 messages)
@@ -260,10 +261,14 @@ async function callChatAPI(query, players, history) {
     messages.push({ role: msg.role || 'user', content: msg.content || '' });
   });
 
-  // Build user message with player context
+  // Build user message with player context — include both tiers
   let userContent = query;
   if (summaries.length > 0) {
-    userContent = `${query}\n\n[Available Player Data — ${summaries.length} candidates]:\n${JSON.stringify(summaries)}`;
+    userContent = `${query}\n\nDETAILED PROFILES (${summaries.length} top candidates):\n${JSON.stringify(summaries)}`;
+    if (index.length > 0) {
+      userContent += `\n\nADDITIONAL PLAYERS INDEX (${index.length} more, format: id|name|age|pos|club|league|rating|value):\n${index.join('\n')}`;
+    }
+    userContent += `\n\nTotal pool: ${players.length} players from the database. Use ALL of this data to answer.`;
   }
   messages.push({ role: 'user', content: userContent });
 
@@ -844,6 +849,9 @@ async function sendUserChatMessage() {
     try {
       // Pre-filter relevant players for context
       const candidates = getPreFilteredForLLM(text);
+      const posCounts = {};
+      candidates.forEach(p => posCounts[p.position] = (posCounts[p.position]||0) + 1);
+      console.log(`[AI Chat] Pre-filtered ${candidates.length} candidates:`, posCounts);
       const result = await callChatAPI(text, candidates, chatConversationHistory.slice(-6));
       typingEl.remove();
 
@@ -877,8 +885,9 @@ async function sendUserChatMessage() {
     } catch (err) {
       typingEl.remove();
       console.error('Chat API error:', err);
-      // Fallback to local
-      const response = generateAIResponse(text, []);
+      // Fallback to local — pass pre-filtered candidates
+      const fallbackCandidates = getPreFilteredForLLM(text);
+      const response = generateAIResponse(text, fallbackCandidates);
       const botMsg = document.createElement('div');
       botMsg.className = 'chat-msg bot';
       botMsg.innerHTML = `<div class="chat-bubble"><p style="color:var(--accent-red);font-size:0.75rem;margin-bottom:0.5rem;">⚠ LLM unavailable (${err.message}), using local analysis:</p>${formatScoutMessage(response.text)}</div>`;
@@ -887,7 +896,8 @@ async function sendUserChatMessage() {
   } else {
     // No API key: use local rule-based system
     typingEl.remove();
-    const response = generateAIResponse(text, []);
+    const fallbackCandidates2 = getPreFilteredForLLM(text);
+    const response = generateAIResponse(text, fallbackCandidates2);
     const botMsg = document.createElement('div');
     botMsg.className = 'chat-msg bot';
     botMsg.innerHTML = `<div class="chat-bubble"><p style="color:var(--text-dim);font-size:0.7rem;margin-bottom:0.5rem;">💡 Set a Groq API key for smarter AI responses</p>${formatScoutMessage(response.text)}</div>`;
