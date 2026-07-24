@@ -238,25 +238,21 @@ function parseAISearch(prompt) {
   let strictAge = false;
   let strictPosition = false;
 
-  // Position keywords - detect specifically and set strict flag
-  if (q.includes("striker") || q.includes("forward") || q.includes("attacker") || q.includes("number 9") || q.includes("fw")) {
-    targetPosition = "FW";
+  // Position keywords - detect specifically using else-if so first match wins
+  // Use word-boundary regex for short codes (fw, mf, df, gk, cb) to avoid substring false positives
+  const wordMatch = (word) => new RegExp(`\\b${word}\\b`).test(q);
+  
+  if (q.includes("goalkeeper") || q.includes("keeper") || wordMatch("gk")) {
+    targetPosition = "GK";
     strictPosition = true;
-  }
-  if (q.includes("winger") || q.includes("wide forward") || q.includes("inside forward")) {
-    targetPosition = "FW";
-    strictPosition = true;
-  }
-  if (q.includes("midfielder") || q.includes("playmaker") || q.includes("pivot") || q.includes("number 8") || q.includes("number 6") || q.includes("number 10") || q.includes("mf") || q.includes("central mid")) {
+  } else if (q.includes("midfielder") || q.includes("playmaker") || q.includes("pivot") || q.includes("number 8") || q.includes("number 6") || q.includes("number 10") || wordMatch("mf") || q.includes("central mid") || q.includes("midfield")) {
     targetPosition = "MF";
     strictPosition = true;
-  }
-  if (q.includes("defender") || q.includes("cb") || q.includes("center back") || q.includes("fullback") || q.includes("wingback") || q.includes("df") || q.includes("wing-back")) {
-    targetPosition = "DF";
+  } else if (q.includes("striker") || q.includes("forward") || q.includes("attacker") || q.includes("number 9") || wordMatch("fw") || q.includes("winger") || q.includes("wide forward") || q.includes("inside forward")) {
+    targetPosition = "FW";
     strictPosition = true;
-  }
-  if (q.includes("goalkeeper") || q.includes("keeper") || q.includes("gk")) {
-    targetPosition = "GK";
+  } else if (q.includes("defender") || wordMatch("cb") || q.includes("center back") || q.includes("centre back") || q.includes("fullback") || q.includes("wingback") || wordMatch("df") || q.includes("wing-back") || q.includes("back line")) {
+    targetPosition = "DF";
     strictPosition = true;
   }
 

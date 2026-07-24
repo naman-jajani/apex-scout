@@ -97,132 +97,291 @@ function hasApiKey() {
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
-const SCOUT_SYSTEM_PROMPT = `You are APEX SCOUT AI, an elite football transfer intelligence system. You have deep expertise in player analysis, tactical systems, and scouting across all major leagues worldwide.
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║           AGENTIC GRAPH RAG — Scouting Intelligence            ║
+// ╚══════════════════════════════════════════════════════════════════╝
+//
+// Architecture:
+//   Query → [Local Decomposer] → [Graph Retriever + Scorer]
+//         → [Token-Budgeted Context Builder] → [LLM Analyzer]
+//
+// This solves token limitations by doing 90% of filtering & ranking
+// locally, sending only the top 15 highly-relevant candidates to LLM.
 
-You have access to a player database spanning 8 top-flight leagues: Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga (Portugal), Brasileirão, and Argentine Primera División.
+// ── System Prompts (compact to save tokens) ──────────────────────
+const SCOUT_SYSTEM_PROMPT = `You are APEX SCOUT AI. You receive pre-scored scouting candidates from our database of 800+ players across 8 leagues (EPL, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga, Brasileirão, Argentine Primera).
 
-When given a scouting query and a database of player profiles, you must:
-1. Carefully analyze each player against ALL criteria in the query (position, age, playstyle, attributes, tactical role, etc.)
-2. Select the top 5-8 best matching players
-3. Assign a match score (0-100) based on how well each player fits ALL stated requirements
-4. Write a detailed scouting rationale for each player explaining WHY they fit
-5. Identify specific strengths relevant to the query
-6. Note any tactical concerns
+The candidates are ALREADY filtered and ranked by our retrieval system. Your job: analyze them against the query, provide expert scouting insight, and return structured recommendations.
 
-CRITICAL RULES:
-- Only recommend players whose POSITION matches what the query asks for (e.g. if they ask for a midfielder, only recommend MF players)
-- Strictly respect age constraints (if they say "under 20", only include players aged 19 or younger)
-- Consider the player's attributes, stats, and playing style holistically
-- Be specific — reference actual stat numbers and attribute ratings in your explanations
+Return ONLY valid JSON:
+{"summary":"2-sentence overview","recommendations":[{"id":"player_id","name":"Full Name","matchScore":92,"explanation":"Why they fit (reference stats/attributes)","keyStrengths":["S1","S2"],"concerns":["C1"]}]}`;
 
-Return ONLY valid JSON in this exact format (no markdown, no code blocks):
-{
-  "summary": "A 2-3 sentence overview of the scouting brief and what type of player profile you looked for",
-  "recommendations": [
-    {
-      "id": "player_id_string",
-      "name": "Player Full Name",
-      "matchScore": 92,
-      "explanation": "Detailed 2-3 sentence scouting rationale referencing specific stats and attributes",
-      "keyStrengths": ["Strength 1", "Strength 2", "Strength 3"],
-      "concerns": ["Concern or limitation 1"]
-    }
-  ]
-}`;
+const CHAT_SYSTEM_PROMPT = `You are APEX SCOUT AI, a football scouting assistant. Data from 8 leagues (EPL, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga, Brasileirão, Argentine Primera).
 
-const CHAT_SYSTEM_PROMPT = `You are APEX SCOUT AI, a conversational football scouting assistant. You help scouts find players, analyze profiles, and build shortlists.
+You receive pre-filtered candidates ranked by our Graph RAG retrieval system. Provide expert analysis using markdown. **Bold** player names. Reference stats. Explain WHY each fits.
 
-You have access to a database spanning 8 top-flight leagues worldwide: Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga (Portugal), Brasileirão, and Argentine Primera División. When the user asks about finding players, analyze the provided player data and recommend the best matches from ANY league unless they specify one.
+When recommending players, append: |||SHORTLIST|||[{"id":"player_id","name":"Name","matchScore":85}]|||END|||`;
 
-RESPONSE FORMAT:
-- Use markdown formatting for readability
-- Use **bold** for player names and key stats
-- Use bullet points for lists
-- Be specific with stats and numbers
-- If recommending players, always explain WHY each player fits
 
-If the user asks about a specific player, give a detailed scouting report.
-If the user asks for a shortlist, provide 5-8 recommendations with explanations.
-If the user asks a follow-up question, reference the conversation context.
+// ── STAGE 1: In-Memory Player Graph ──────────────────────────────
+// Builds multi-dimensional indexes for fast retrieval
+const PlayerGraph = {
+  _built: false,
+  byPosition: {},   // { MF: [player, ...], FW: [...] }
+  byLeague: {},      // { "Premier League": [...] }
+  byAgeGroup: {},    // { "u20": [...], "u23": [...], "prime": [...], "veteran": [...] }
+  byValueTier: {},   // { "elite": [...], "high": [...], "mid": [...], "budget": [...] }
+  byNation: {},      // { "Brazil": [...] }
+  byClub: {},        // { "Real Madrid": [...] }
+  attributeVectors: new Map(),  // playerId → normalized attribute vector
+  
+  build() {
+    if (this._built) return;
+    
+    PLAYER_DATABASE.forEach(p => {
+      // Position index
+      (this.byPosition[p.position] = this.byPosition[p.position] || []).push(p);
+      
+      // League index
+      (this.byLeague[p.league] = this.byLeague[p.league] || []).push(p);
+      
+      // Age group index
+      const ageGroup = p.age < 20 ? 'u20' : p.age < 23 ? 'u23' : p.age < 28 ? 'prime' : 'veteran';
+      (this.byAgeGroup[ageGroup] = this.byAgeGroup[ageGroup] || []).push(p);
+      
+      // Value tier index
+      const tier = p.value >= 80_000_000 ? 'elite' : p.value >= 30_000_000 ? 'high' : p.value >= 10_000_000 ? 'mid' : 'budget';
+      (this.byValueTier[tier] = this.byValueTier[tier] || []).push(p);
+      
+      // Nation index
+      (this.byNation[p.nation] = this.byNation[p.nation] || []).push(p);
+      
+      // Club index
+      (this.byClub[p.club] = this.byClub[p.club] || []).push(p);
+      
+      // Pre-compute normalized attribute vector for similarity scoring
+      const attrs = p.attributes;
+      const vec = [
+        attrs.pace / 100, attrs.dribbling / 100, attrs.passing / 100,
+        attrs.defending / 100, attrs.physicality / 100, attrs.tactical / 100,
+        attrs.workrate / 100
+      ];
+      this.attributeVectors.set(p.id, vec);
+    });
+    
+    this._built = true;
+    console.log(`[Graph RAG] Built player graph: ${PLAYER_DATABASE.length} players, ` +
+      `${Object.keys(this.byPosition).length} positions, ${Object.keys(this.byLeague).length} leagues`);
+  }
+};
 
-When recommending players, also include a JSON block at the very end of your response on its own line, formatted as:
-|||SHORTLIST|||[{"id":"player_id","name":"Name","matchScore":85}]|||END|||
 
-This hidden data helps the UI display the shortlist. Only include this when you are recommending specific players.`;
-
-// ── Compact Player Summary Builder (for LLM context) ─────────────
-// Tier 1: Full detail summaries for top candidates
-function buildPlayerSummaries(players) {
-  return players.slice(0, 50).map(p => {
-    const ds = p.detailedStats || {};
-    const s = {
-      id: p.id, name: p.name, age: p.age, pos: p.position, role: p.role,
-      club: p.club, league: p.league, nation: p.nation,
-      rating: p.rating, valueMil: Math.round(p.value / 1000000 * 10) / 10,
-      attr: p.attributes,
-      strengths: (p.strengths || []).slice(0, 3),
-      weaknesses: (p.weaknesses || []).slice(0, 2)
-    };
-    if (Object.keys(ds).length) {
-      s.stats = {
-        g90: ds.goalsPer90, kp90: ds.keyPassesPer90, tw90: ds.tacklesWonPer90,
-        passAcc: ds.passingAccuracy, drib90: ds.dribblesCompletedPer90,
-        prog90: ds.progressivePassesPer90, int90: ds.interceptionsPer90,
-        chances: ds.chancesCreated, xG: ds.expectedGoals,
-        apps: ds.appearances || (p.general && p.general.apps)
-      };
-    }
-    return s;
-  });
+// ── STAGE 2: Query Decomposer ────────────────────────────────────
+// Extracts structured requirements from natural language
+function decomposeQuery(query) {
+  const reqs = parseAISearch(query); // Reuse the proven keyword parser from ai.js
+  
+  // Build ideal attribute vector from query keywords
+  const idealVector = buildIdealVector(query, reqs);
+  
+  return {
+    ...reqs,
+    idealVector,
+    originalQuery: query,
+  };
 }
 
-// Tier 2: Ultra-compact index for remaining players (one-liner per player)
-function buildPlayerIndex(players, startIdx) {
-  return players.slice(startIdx, startIdx + 500).map(p =>
-    `${p.id}|${p.name}|${p.age}|${p.position}|${p.club}|${p.league}|${p.rating}|${Math.round(p.value/1000000)}M`
-  );
+// Maps query keywords to an ideal normalized attribute vector
+function buildIdealVector(query, reqs) {
+  const q = query.toLowerCase();
+  
+  // Start with a balanced baseline
+  let vec = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+  // indices: [pace, dribbling, passing, defending, physicality, tactical, workrate]
+  
+  // Amplify based on keywords
+  const boosts = {
+    // Pace
+    'fast': [0, 0.3], 'pace': [0, 0.35], 'speed': [0, 0.35], 'rapid': [0, 0.3], 'quick': [0, 0.25],
+    // Dribbling
+    'dribbl': [1, 0.35], 'creative': [1, 0.25], 'flair': [1, 0.3], 'skill': [1, 0.25], 'technique': [1, 0.3],
+    // Passing
+    'pass': [2, 0.35], 'vision': [2, 0.3], 'playmaker': [2, 0.35], 'creative': [2, 0.2], 'distribut': [2, 0.3],
+    'rhythm': [2, 0.3], 'set the': [2, 0.25], 'tempo': [2, 0.3], 'orchestrat': [2, 0.3],
+    // Defending
+    'defend': [3, 0.35], 'tackle': [3, 0.3], 'intercept': [3, 0.3], 'solid': [3, 0.2], 'robust': [3, 0.25],
+    // Physicality
+    'physical': [4, 0.35], 'strong': [4, 0.3], 'aerial': [4, 0.25], 'powerful': [4, 0.3], 'tough': [4, 0.25],
+    // Tactical
+    'tactical': [5, 0.3], 'intelligent': [5, 0.3], 'smart': [5, 0.25], 'position': [5, 0.2], 'read': [5, 0.2],
+    // Workrate
+    'work': [6, 0.35], 'horse': [6, 0.3], 'engine': [6, 0.35], 'energetic': [6, 0.3], 'tireless': [6, 0.35],
+    'box-to-box': [6, 0.3], 'b2b': [6, 0.3], 'stamina': [6, 0.35], 'industrious': [6, 0.3],
+    'press': [6, 0.2],
+  };
+  
+  for (const [keyword, [idx, boost]] of Object.entries(boosts)) {
+    if (q.includes(keyword)) {
+      vec[idx] = Math.min(1.0, vec[idx] + boost);
+    }
+  }
+  
+  // Position-based priors
+  if (reqs.targetPosition === 'GK') {
+    vec = [0.2, 0.2, 0.4, 0.9, 0.6, 0.6, 0.5];
+  } else if (reqs.targetPosition === 'DF') {
+    vec[3] = Math.max(vec[3], 0.7); // defending
+    vec[4] = Math.max(vec[4], 0.6); // physicality
+  } else if (reqs.targetPosition === 'FW') {
+    vec[0] = Math.max(vec[0], 0.6); // pace
+    vec[1] = Math.max(vec[1], 0.6); // dribbling
+  }
+  
+  return vec;
 }
 
-// ── Pre-filter players for LLM context ────────────────────────────
-function getPreFilteredForLLM(query) {
-  const reqs = parseAISearch(query);
+
+// ── STAGE 3: Graph Retriever + Multi-Factor Scorer ───────────────
+// Scores ALL players locally using the decomposed query
+function graphRetrieve(decomposed) {
+  PlayerGraph.build(); // Ensure graph is built
+  
+  const { targetPosition, strictPosition, targetLeague, strictAge,
+          maxAge, minAge, maxValue, idealVector, weightAdjust } = decomposed;
+  
+  // Step 1: Hard filters (position, age, value, league)
   let candidates = PLAYER_DATABASE.filter(p => {
-    if (reqs.targetLeague && p.league !== reqs.targetLeague) return false;
-    if (reqs.strictPosition && reqs.targetPosition && p.position !== reqs.targetPosition) return false;
-    if (reqs.strictAge && reqs.maxAge && p.age >= reqs.maxAge) return false;
-    if (reqs.strictAge && reqs.minAge && p.age <= reqs.minAge) return false;
-    if (reqs.maxValue && p.value > reqs.maxValue) return false;
+    if (strictPosition && targetPosition && p.position !== targetPosition) return false;
+    if (strictAge && maxAge && p.age >= maxAge) return false;
+    if (strictAge && minAge && p.age <= minAge) return false;
+    if (maxValue && p.value > maxValue) return false;
+    if (targetLeague && p.league !== targetLeague) return false;
     return true;
   });
-  // If too few after strict filter, relax position but keep league
-  if (candidates.length < 15) {
+  
+  // Fallback: if too few, relax constraints progressively
+  if (candidates.length < 10) {
     candidates = PLAYER_DATABASE.filter(p => {
-      if (reqs.targetLeague && p.league !== reqs.targetLeague) return false;
-      if (reqs.targetPosition && p.position !== reqs.targetPosition) return false;
+      if (targetPosition && p.position !== targetPosition) return false;
+      if (maxAge && p.age >= maxAge) return false;
       return true;
     });
   }
-  // If still too few, relax everything
-  if (candidates.length < 15) {
+  if (candidates.length < 5) {
     candidates = PLAYER_DATABASE.filter(p => {
-      if (reqs.targetPosition && p.position !== reqs.targetPosition) return false;
+      if (targetPosition && p.position !== targetPosition) return false;
       return true;
     });
   }
-  candidates.sort((a, b) => b.rating - a.rating);
-  return candidates;
+  
+  // Step 2: Score each candidate using multi-factor similarity
+  const scored = candidates.map(p => {
+    const playerVec = PlayerGraph.attributeVectors.get(p.id);
+    
+    // Factor 1: Cosine similarity between ideal and actual attribute vectors
+    const cosineSim = cosineSimilarity(idealVector, playerVec);
+    
+    // Factor 2: Weighted attribute match (from parseAISearch weights)
+    let weightedAttrScore = 0;
+    let totalWeight = 0;
+    for (const [attr, multiplier] of Object.entries(weightAdjust)) {
+      weightedAttrScore += (p.attributes[attr] / 100) * multiplier;
+      totalWeight += multiplier;
+    }
+    const attrScore = totalWeight > 0 ? weightedAttrScore / totalWeight : 0.5;
+    
+    // Factor 3: Base quality (rating normalized)
+    const qualityScore = p.rating / 100;
+    
+    // Factor 4: Age fit bonus (younger = higher potential for "young" queries)
+    let ageFit = 1.0;
+    if (maxAge && maxAge <= 23) {
+      ageFit = p.age <= 20 ? 1.15 : p.age <= 22 ? 1.05 : 1.0;
+    }
+    
+    // Composite score: 40% cosine similarity + 30% weighted attrs + 20% quality + 10% age bonus
+    const compositeScore = (cosineSim * 0.4 + attrScore * 0.3 + qualityScore * 0.2 + (ageFit - 1) * 0.1) * 100;
+    
+    return {
+      player: p,
+      retrievalScore: Math.round(Math.min(100, Math.max(0, compositeScore))),
+      cosineSim: Math.round(cosineSim * 100),
+    };
+  });
+  
+  // Sort by retrieval score
+  scored.sort((a, b) => b.retrievalScore - a.retrievalScore);
+  
+  console.log(`[Graph RAG] Retrieved ${scored.length} candidates, top: ${
+    scored.slice(0, 3).map(s => `${s.player.name}(${s.retrievalScore})`).join(', ')
+  }`);
+  
+  return scored;
 }
 
-// ── Direct Groq API Callers (browser → Groq, no server needed) ───
-async function callScoutAPI(query, players) {
-  const summaries = buildPlayerSummaries(players);
-  const index = buildPlayerIndex(players, 50);
-  let userMsg = `SCOUTING QUERY: "${query}"\n\nDETAILED PROFILES (${summaries.length} top candidates):\n${JSON.stringify(summaries)}`;
-  if (index.length > 0) {
-    userMsg += `\n\nADDITIONAL PLAYERS INDEX (${index.length} more, format: id|name|age|pos|club|league|rating|value):\n${index.join('\n')}`;
+// Vector cosine similarity
+function cosineSimilarity(a, b) {
+  let dot = 0, magA = 0, magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
   }
-  userMsg += `\n\nTotal pool: ${players.length} players. Analyze against the scouting query. Return your ranked recommendations as JSON.`;
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  return denom === 0 ? 0 : dot / denom;
+}
 
+
+// ── STAGE 4: Token-Budgeted Context Builder ──────────────────────
+// Assembles LLM context within strict token budget (~8K tokens)
+function buildRAGContext(scoredPlayers, query) {
+  // Top 15 get detailed profiles (~4K tokens)
+  const detailed = scoredPlayers.slice(0, 15).map(s => {
+    const p = s.player;
+    const ds = p.detailedStats || {};
+    const profile = {
+      id: p.id, name: p.name, age: p.age, pos: p.position, role: p.role,
+      club: p.club, league: p.league, nation: p.nation,
+      rating: p.rating, valueMil: Math.round(p.value / 1e6 * 10) / 10,
+      retrievalScore: s.retrievalScore,
+      attr: p.attributes,
+      strengths: (p.strengths || []).slice(0, 3),
+      weaknesses: (p.weaknesses || []).slice(0, 2),
+    };
+    // Add position-relevant stats only
+    if (p.position === 'GK') {
+      profile.stats = { savePerc: ds.savePercentage, cs: ds.cleanSheets, passAcc: ds.passingAccuracy };
+    } else if (p.position === 'DF') {
+      profile.stats = { tw90: ds.tacklesWonPer90, int90: ds.interceptionsPer90, passAcc: ds.passingAccuracy, prog90: ds.progressivePassesPer90 };
+    } else if (p.position === 'FW') {
+      profile.stats = { g90: ds.goalsPer90, xG: ds.expectedGoals, kp90: ds.keyPassesPer90, drib90: ds.dribblesCompletedPer90 };
+    } else {
+      profile.stats = { kp90: ds.keyPassesPer90, prog90: ds.progressivePassesPer90, passAcc: ds.passingAccuracy, drib90: ds.dribblesCompletedPer90, tw90: ds.tacklesWonPer90 };
+    }
+    return profile;
+  });
+  
+  // Next 35 get compact one-liners (~1K tokens)
+  const compact = scoredPlayers.slice(15, 50).map(s => {
+    const p = s.player;
+    return `${p.id}|${p.name}|${p.age}|${p.position}|${p.club}|${p.league}|${p.rating}|${Math.round(p.value/1e6)}M|score:${s.retrievalScore}`;
+  });
+  
+  let context = `SCOUTING QUERY: "${query}"\n\n`;
+  context += `TOP 15 CANDIDATES (pre-scored by Graph RAG retrieval):\n${JSON.stringify(detailed)}\n\n`;
+  if (compact.length > 0) {
+    context += `ADDITIONAL CANDIDATES (${compact.length} more, format: id|name|age|pos|club|league|rating|value|score):\n${compact.join('\n')}\n\n`;
+  }
+  context += `Total pool searched: ${PLAYER_DATABASE.length} players. The above are the best matches from our retrieval system.`;
+  
+  return context;
+}
+
+
+// ── STAGE 5: LLM API Callers ─────────────────────────────────────
+async function callScoutAPI(query, scoredPlayers) {
+  const context = buildRAGContext(scoredPlayers, query);
+  
   const res = await fetch(GROQ_API_URL, {
     method: 'POST',
     headers: {
@@ -233,10 +392,10 @@ async function callScoutAPI(query, players) {
       model: GROQ_MODEL,
       messages: [
         { role: 'system', content: SCOUT_SYSTEM_PROMPT },
-        { role: 'user', content: userMsg }
+        { role: 'user', content: context }
       ],
       temperature: 0.3,
-      max_tokens: 3000,
+      max_tokens: 1500,
       response_format: { type: 'json_object' }
     })
   });
@@ -251,26 +410,16 @@ async function callScoutAPI(query, players) {
   return JSON.parse(data.choices[0].message.content);
 }
 
-async function callChatAPI(query, players, history) {
-  const summaries = buildPlayerSummaries(players);
-  const index = buildPlayerIndex(players, 50);
+async function callChatAPI(query, scoredPlayers, history) {
+  const context = buildRAGContext(scoredPlayers, query);
   const messages = [{ role: 'system', content: CHAT_SYSTEM_PROMPT }];
 
-  // Add conversation history (last 6 messages)
-  history.slice(-6).forEach(msg => {
+  // Add conversation history (last 4 messages to save tokens)
+  history.slice(-4).forEach(msg => {
     messages.push({ role: msg.role || 'user', content: msg.content || '' });
   });
 
-  // Build user message with player context — include both tiers
-  let userContent = query;
-  if (summaries.length > 0) {
-    userContent = `${query}\n\nDETAILED PROFILES (${summaries.length} top candidates):\n${JSON.stringify(summaries)}`;
-    if (index.length > 0) {
-      userContent += `\n\nADDITIONAL PLAYERS INDEX (${index.length} more, format: id|name|age|pos|club|league|rating|value):\n${index.join('\n')}`;
-    }
-    userContent += `\n\nTotal pool: ${players.length} players from the database. Use ALL of this data to answer.`;
-  }
-  messages.push({ role: 'user', content: userContent });
+  messages.push({ role: 'user', content: context });
 
   const res = await fetch(GROQ_API_URL, {
     method: 'POST',
@@ -282,7 +431,7 @@ async function callChatAPI(query, players, history) {
       model: GROQ_MODEL,
       messages: messages,
       temperature: 0.5,
-      max_tokens: 2000
+      max_tokens: 1500
     })
   });
 
@@ -708,11 +857,12 @@ async function handleAIGridSearch(query) {
   activeTacticalRole = null;
 
   try {
-    // Pre-filter candidates using keyword parser for LLM context
-    const candidates = getPreFilteredForLLM(query);
-    logScraperConsole(`Pre-filtered ${candidates.length} candidates for LLM analysis.`, 'info');
+    // Graph RAG: Decompose query → Retrieve & score → Send to LLM
+    const decomposed = decomposeQuery(query);
+    const scoredCandidates = graphRetrieve(decomposed);
+    logScraperConsole(`[Graph RAG] Scored ${scoredCandidates.length} candidates, sending top 15 to LLM.`, 'info');
 
-    const result = await callScoutAPI(query, candidates);
+    const result = await callScoutAPI(query, scoredCandidates);
 
     // Map LLM recommendations back to full player objects
     const recs = result.recommendations || [];
@@ -847,12 +997,13 @@ async function sendUserChatMessage() {
   // Decide: use LLM or fallback
   if (hasApiKey()) {
     try {
-      // Pre-filter relevant players for context
-      const candidates = getPreFilteredForLLM(text);
+      // Graph RAG: Decompose → Retrieve & score → Send to LLM
+      const decomposed = decomposeQuery(text);
+      const scoredCandidates = graphRetrieve(decomposed);
       const posCounts = {};
-      candidates.forEach(p => posCounts[p.position] = (posCounts[p.position]||0) + 1);
-      console.log(`[AI Chat] Pre-filtered ${candidates.length} candidates:`, posCounts);
-      const result = await callChatAPI(text, candidates, chatConversationHistory.slice(-6));
+      scoredCandidates.forEach(s => posCounts[s.player.position] = (posCounts[s.player.position]||0) + 1);
+      console.log(`[Graph RAG Chat] Scored ${scoredCandidates.length} candidates:`, posCounts);
+      const result = await callChatAPI(text, scoredCandidates, chatConversationHistory.slice(-4));
       typingEl.remove();
 
       const responseText = result.text || 'I could not process that query. Please try again.';
@@ -885,9 +1036,10 @@ async function sendUserChatMessage() {
     } catch (err) {
       typingEl.remove();
       console.error('Chat API error:', err);
-      // Fallback to local — pass pre-filtered candidates
-      const fallbackCandidates = getPreFilteredForLLM(text);
-      const response = generateAIResponse(text, fallbackCandidates);
+      // Fallback to local — use Graph RAG retrieval for local analysis
+      const fallbackDecomposed = decomposeQuery(text);
+      const fallbackScored = graphRetrieve(fallbackDecomposed);
+      const response = generateAIResponse(text, fallbackScored.map(s => s.player));
       const botMsg = document.createElement('div');
       botMsg.className = 'chat-msg bot';
       botMsg.innerHTML = `<div class="chat-bubble"><p style="color:var(--accent-red);font-size:0.75rem;margin-bottom:0.5rem;">⚠ LLM unavailable (${err.message}), using local analysis:</p>${formatScoutMessage(response.text)}</div>`;
@@ -896,8 +1048,9 @@ async function sendUserChatMessage() {
   } else {
     // No API key: use local rule-based system
     typingEl.remove();
-    const fallbackCandidates2 = getPreFilteredForLLM(text);
-    const response = generateAIResponse(text, fallbackCandidates2);
+    const fallbackDecomposed2 = decomposeQuery(text);
+    const fallbackScored2 = graphRetrieve(fallbackDecomposed2);
+    const response = generateAIResponse(text, fallbackScored2.map(s => s.player));
     const botMsg = document.createElement('div');
     botMsg.className = 'chat-msg bot';
     botMsg.innerHTML = `<div class="chat-bubble"><p style="color:var(--text-dim);font-size:0.7rem;margin-bottom:0.5rem;">💡 Set a Groq API key for smarter AI responses</p>${formatScoutMessage(response.text)}</div>`;
