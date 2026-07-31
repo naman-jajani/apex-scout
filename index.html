@@ -319,9 +319,64 @@
 
         </div>
 
-        <!-- Modal Right: Heatmap Canvas, Percentiles comparative stats, AI Suitability score -->
+        <!-- Modal Right: Season Stats, Heatmap, Percentiles, AI Assessment -->
         <div class="modal-right">
           
+          <!-- Season Stats Panel (Competition-level breakdown) -->
+          <div class="section-card glass-panel" id="seasonStatsPanel">
+            <h4 class="section-card-title" style="color:var(--accent-cyan); margin-bottom:0.6rem;">
+              📊 Season Stats 2025/26
+              <span id="seasonStatsSource" style="font-size:0.6rem; color:var(--text-dim);">Source: FotMob</span>
+            </h4>
+            <div style="display:flex; gap:0.5rem; margin-bottom:0.8rem; flex-wrap:wrap;">
+              <button class="comp-tab active" data-comp="combined" id="compTabCombined">All Competitions</button>
+              <div id="compTabsContainer" style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                <!-- Dynamic competition tabs injected here -->
+              </div>
+            </div>
+            <div class="season-stats-table-wrapper" style="overflow-x:auto;">
+              <table class="season-stats-table" id="seasonStatsTable">
+                <thead>
+                  <tr>
+                    <th>Competition</th>
+                    <th>Apps</th>
+                    <th>G</th>
+                    <th>A</th>
+                    <th>Mins</th>
+                    <th>Rating</th>
+                    <th>xG</th>
+                    <th>xA</th>
+                    <th>🟨</th>
+                    <th>🟥</th>
+                  </tr>
+                </thead>
+                <tbody id="seasonStatsBody">
+                  <!-- Dynamic stats rows -->
+                </tbody>
+                <tfoot id="seasonStatsFoot">
+                  <tr class="total-row">
+                    <td><strong>Total</strong></td>
+                    <td id="statsTotalApps">-</td>
+                    <td id="statsTotalGoals">-</td>
+                    <td id="statsTotalAssists">-</td>
+                    <td id="statsTotalMins">-</td>
+                    <td id="statsTotalRating">-</td>
+                    <td id="statsTotalXG">-</td>
+                    <td id="statsTotalXA">-</td>
+                    <td id="statsTotalYC">-</td>
+                    <td id="statsTotalRC">-</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <!-- Detailed per-tournament view (shown when a specific comp tab is clicked) -->
+            <div id="compDetailedStats" style="display:none; margin-top:0.8rem;">
+              <div class="detailed-stats-grid" id="detailedStatsGrid">
+                <!-- Dynamic detailed stats cards -->
+              </div>
+            </div>
+          </div>
+
           <div class="section-grid">
             
             <!-- Heatmap canvas card -->

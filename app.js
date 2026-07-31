@@ -358,6 +358,11 @@ function buildRAGContext(scoredPlayers, query) {
     } else {
       profile.stats = { kp90: ds.keyPassesPer90, prog90: ds.progressivePassesPer90, passAcc: ds.passingAccuracy, drib90: ds.dribblesCompletedPer90, tw90: ds.tacklesWonPer90 };
     }
+    // Add season stats summary (25/26)
+    if (p.seasonStats && p.seasonStats.combined) {
+      const c = p.seasonStats.combined;
+      profile.season = { apps: c.appearances, g: c.goals, a: c.assists, mins: c.minutes, rating: c.avg_rating, comps: Object.keys(p.seasonStats.competitions || {}).length };
+    }
     return profile;
   });
   
@@ -1277,6 +1282,209 @@ function loadPlayerADetails(player) {
   
   // Render Radar Chart
   renderRadarChart(player, null);
+  
+  // Render Season Stats panel
+  renderSeasonStats(player);
+}
+
+// ── Season Stats Renderer ────────────────────────────────────
+const COMP_ICONS = {
+  'Premier League': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'La Liga': '🇪🇸', 'Bundesliga': '🇩🇪',
+  'Serie A': '🇮🇹', 'Ligue 1': '🇫🇷', 'Primeira Liga': '🇵🇹',
+  'Brasileirão': '🇧🇷', 'Argentine Primera': '🇦🇷',
+  'Champions League': '🏆', 'Europa League': '🥈', 'Conference League': '🥉',
+  'Copa Libertadores': '🏆', 'Copa Sudamericana': '🥈',
+  'FA Cup': '🏟️', 'EFL Cup': '🏟️', 'Copa del Rey': '🏟️',
+  'DFB-Pokal': '🏟️', 'Coppa Italia': '🏟️', 'Coupe de France': '🏟️',
+  'Copa do Brasil': '🏟️', 'Copa Argentina': '🏟️',
+  'Taça de Portugal': '🏟️', 'Supercopa de España': '🏟️',
+  'Supercoppa Italiana': '🏟️', 'DFL-Supercup': '🏟️',
+  'Trophée des Champions': '🏟️', 'Supertaça': '🏟️',
+  'Community Shield': '🏟️',
+  'World Cup 2026': '🌍', 'UEFA Nations League': '🇪🇺',
+  'Copa América': '🌎', 'AFCON 2025': '🌍',
+};
+
+const COMP_CATEGORIES = {
+  league: ['Premier League', 'La Liga', 'Bundesliga', 'Serie A', 'Ligue 1', 'Primeira Liga', 'Brasileirão', 'Argentine Primera'],
+  continental: ['Champions League', 'Europa League', 'Conference League', 'Copa Libertadores', 'Copa Sudamericana'],
+  cup: ['FA Cup', 'EFL Cup', 'Copa del Rey', 'DFB-Pokal', 'Coppa Italia', 'Coupe de France', 'Copa do Brasil', 'Copa Argentina', 'Taça de Portugal', 'Supercopa de España', 'Supercoppa Italiana', 'DFL-Supercup', 'Trophée des Champions', 'Supertaça', 'Community Shield'],
+  intl: ['World Cup 2026', 'UEFA Nations League', 'Copa América', 'AFCON 2025'],
+};
+
+function getCompCategory(compName) {
+  for (const [cat, comps] of Object.entries(COMP_CATEGORIES)) {
+    if (comps.includes(compName)) return cat;
+  }
+  return 'other';
+}
+
+function renderSeasonStats(player) {
+  const panel = document.getElementById('seasonStatsPanel');
+  if (!panel) return;
+  
+  const ss = player.seasonStats;
+  if (!ss || !ss.competitions) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+  
+  const comps = ss.competitions;
+  const combined = ss.combined || {};
+  const compNames = Object.keys(comps);
+  
+  // Build competition tabs
+  const tabsContainer = document.getElementById('compTabsContainer');
+  tabsContainer.innerHTML = '';
+  compNames.forEach(name => {
+    const btn = document.createElement('button');
+    btn.className = 'comp-tab';
+    btn.dataset.comp = name;
+    btn.textContent = (COMP_ICONS[name] || '⚽') + ' ' + name;
+    btn.onclick = () => selectCompTab(player, name);
+    tabsContainer.appendChild(btn);
+  });
+  
+  // Combined tab handler
+  const combinedBtn = document.getElementById('compTabCombined');
+  combinedBtn.onclick = () => selectCompTab(player, 'combined');
+  combinedBtn.classList.add('active');
+  
+  // Render all-competitions table
+  renderStatsTable(player, 'combined');
+}
+
+function selectCompTab(player, compKey) {
+  // Update active tab
+  document.querySelectorAll('.comp-tab').forEach(t => t.classList.remove('active'));
+  if (compKey === 'combined') {
+    document.getElementById('compTabCombined').classList.add('active');
+  } else {
+    document.querySelectorAll('.comp-tab').forEach(t => {
+      if (t.dataset.comp === compKey) t.classList.add('active');
+    });
+  }
+  renderStatsTable(player, compKey);
+}
+
+function renderStatsTable(player, compKey) {
+  const tbody = document.getElementById('seasonStatsBody');
+  const detailPanel = document.getElementById('compDetailedStats');
+  const detailGrid = document.getElementById('detailedStatsGrid');
+  const ss = player.seasonStats;
+  
+  tbody.innerHTML = '';
+  
+  if (compKey === 'combined') {
+    // Show all competitions as rows
+    detailPanel.style.display = 'none';
+    
+    // Sort: league first, then continental, then cups, then intl
+    const order = ['league', 'continental', 'cup', 'intl', 'other'];
+    const sorted = Object.entries(ss.competitions).sort((a, b) => {
+      return order.indexOf(getCompCategory(a[0])) - order.indexOf(getCompCategory(b[0]));
+    });
+    
+    sorted.forEach(([name, stats]) => {
+      const cat = getCompCategory(name);
+      const tr = document.createElement('tr');
+      tr.className = `${cat}-row`;
+      const icon = COMP_ICONS[name] || '⚽';
+      tr.innerHTML = `
+        <td><span class="comp-icon">${icon}</span>${name}</td>
+        <td>${stats.appearances || 0}</td>
+        <td class="${stats.goals > 0 ? 'stat-highlight' : ''}">${stats.goals || 0}</td>
+        <td class="${stats.assists > 0 ? 'stat-highlight' : ''}">${stats.assists || 0}</td>
+        <td>${stats.minutes || 0}</td>
+        <td>${stats.rating || '-'}</td>
+        <td>${stats.xG || '-'}</td>
+        <td>${stats.xA || '-'}</td>
+        <td>${stats.yellow_cards || 0}</td>
+        <td>${stats.red_cards || 0}</td>
+      `;
+      tr.style.cursor = 'pointer';
+      tr.onclick = () => selectCompTab(player, name);
+      tbody.appendChild(tr);
+    });
+    
+    // Update totals
+    const c = ss.combined || {};
+    document.getElementById('statsTotalApps').textContent = c.appearances || 0;
+    document.getElementById('statsTotalGoals').textContent = c.goals || 0;
+    document.getElementById('statsTotalAssists').textContent = c.assists || 0;
+    document.getElementById('statsTotalMins').textContent = c.minutes || 0;
+    document.getElementById('statsTotalRating').textContent = c.avg_rating || '-';
+    document.getElementById('statsTotalXG').textContent = c.xG || '-';
+    document.getElementById('statsTotalXA').textContent = c.xA || '-';
+    document.getElementById('statsTotalYC').textContent = c.yellow_cards || 0;
+    document.getElementById('statsTotalRC').textContent = c.red_cards || 0;
+    document.getElementById('seasonStatsFoot').style.display = '';
+    
+  } else {
+    // Show single competition detailed view
+    const stats = ss.competitions[compKey];
+    if (!stats) return;
+    
+    // Single row in table
+    const cat = getCompCategory(compKey);
+    const icon = COMP_ICONS[compKey] || '⚽';
+    const tr = document.createElement('tr');
+    tr.className = `${cat}-row`;
+    tr.innerHTML = `
+      <td><span class="comp-icon">${icon}</span>${compKey}</td>
+      <td>${stats.appearances || 0}</td>
+      <td class="${stats.goals > 0 ? 'stat-highlight' : ''}">${stats.goals || 0}</td>
+      <td class="${stats.assists > 0 ? 'stat-highlight' : ''}">${stats.assists || 0}</td>
+      <td>${stats.minutes || 0}</td>
+      <td>${stats.rating || '-'}</td>
+      <td>${stats.xG || '-'}</td>
+      <td>${stats.xA || '-'}</td>
+      <td>${stats.yellow_cards || 0}</td>
+      <td>${stats.red_cards || 0}</td>
+    `;
+    tbody.appendChild(tr);
+    document.getElementById('seasonStatsFoot').style.display = 'none';
+    
+    // Show detailed stats cards
+    const detailed = stats.detailed || {};
+    if (Object.keys(detailed).length > 0) {
+      detailPanel.style.display = '';
+      detailGrid.innerHTML = '';
+      
+      const detailLabels = {
+        shots_per90: ['Shots', '/90'],
+        key_passes_per90: ['Key Passes', '/90'],
+        pass_accuracy: ['Pass Acc.', '%'],
+        tackles_per90: ['Tackles', '/90'],
+        interceptions_per90: ['Intercepts', '/90'],
+        dribbles_per90: ['Dribbles', '/90'],
+        aerials_per90: ['Aerials', '/90'],
+        saves_per90: ['Saves', '/90'],
+        save_pct: ['Save %', '%'],
+        clean_sheets: ['Clean Sheets', ''],
+      };
+      
+      for (const [key, val] of Object.entries(detailed)) {
+        if (val === 0 && !['clean_sheets'].includes(key)) continue;
+        if (key === 'saves_per90' && player.position !== 'GK') continue;
+        if (key === 'save_pct' && player.position !== 'GK') continue;
+        if (key === 'clean_sheets' && player.position !== 'GK') continue;
+        
+        const [label, unit] = detailLabels[key] || [key.replace(/_/g, ' '), ''];
+        const card = document.createElement('div');
+        card.className = 'detailed-stat-card';
+        card.innerHTML = `
+          <div class="stat-label">${label}</div>
+          <div class="stat-value">${val}${unit === '%' ? '%' : ''}</div>
+          ${unit === '/90' ? `<div class="stat-per90">per 90 min</div>` : ''}
+        `;
+        detailGrid.appendChild(card);
+      }
+    } else {
+      detailPanel.style.display = 'none';
+    }
+  }
 }
 
 // Render horizontal bars (handles single player or compared player)
