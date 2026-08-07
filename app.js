@@ -459,6 +459,14 @@ window.addEventListener("DOMContentLoaded", () => {
   const countSpan = document.getElementById('playerCountSpan');
   if (countSpan) countSpan.textContent = `${PLAYER_DATABASE.length} Players · ${leagues.size} Leagues`;
   
+  // Update data coverage counters
+  const wikiCount = PLAYER_DATABASE.filter(p => p.seasonStats && p.seasonStats.source === 'wikipedia').length;
+  const estCount = PLAYER_DATABASE.length - wikiCount;
+  const wikiSpan = document.getElementById('wikiCountSpan');
+  const estSpan = document.getElementById('estCountSpan');
+  if (wikiSpan) wikiSpan.textContent = wikiCount;
+  if (estSpan) estSpan.textContent = estCount;
+  
   renderFormationRoles();
   renderPlayers();
   
@@ -771,12 +779,22 @@ function renderPlayers() {
     
     const formattedVal = item.value >= 1000000 ? `€${item.value / 1000000}M` : `€${item.value / 1000}`;
     
+    const ss = item.seasonStats || {};
+    const ssCombi = ss.combined || {};
+    const isWiki = ss.source === 'wikipedia';
+    const displayApps = isWiki ? (ssCombi.appearances || 0) : item.general.apps;
+    const displayGoals = isWiki ? (ssCombi.goals || 0) : item.general.goals;
+    const displayAssists = isWiki ? (ssCombi.assists || 0) : item.general.assists;
+    const srcTag = isWiki 
+      ? '<span class="data-src-tag wiki" title="Real stats from Wikipedia">📖 Wiki</span>'
+      : '<span class="data-src-tag est" title="Estimated / simulated stats">📊 Est.</span>';
+    
     card.innerHTML = `
       ${fitBadgeHtml}
       <div class="player-card-header">
         <div class="player-basic-info">
           <p style="color:var(--accent-cyan);font-weight:600;font-size:0.75rem;text-transform:uppercase;">${item.position} • ${item.role}</p>
-          <h3 title="${item.name}">${item.name}</h3>
+          <h3 title="${item.name}">${item.name} ${srcTag}</h3>
           <p>${item.club} (${item.nation})</p>
         </div>
         <div class="${ratingClass}">
@@ -796,7 +814,7 @@ function renderPlayers() {
         </div>
         <div class="meta-item" style="text-align:right;">
           <span class="meta-label">Apps (G/A)</span>
-          <span class="meta-val">${item.general.apps} (${item.general.goals}/${item.general.assists})</span>
+          <span class="meta-val">${displayApps} (${displayGoals}/${displayAssists})</span>
         </div>
       </div>
       
