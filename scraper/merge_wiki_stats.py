@@ -307,6 +307,98 @@ def generate_fallback_stats(player):
     }
 
 
+def enrich_advanced_stats(player, season_stats):
+    """Estimate assists, xG, xA, yellow/red cards from player attributes.
+    Wikipedia only has apps+goals. We derive the rest from player profile."""
+    rng = random.Random(int(hashlib.md5(player['name'].encode()).hexdigest()[:8], 16))
+    pos = player.get('position', 'MF')
+    attrs = player.get('attributes', {})
+    passing = attrs.get('passing', 60)
+    dribbling = attrs.get('dribbling', 60)
+    physicality = attrs.get('physicality', 60)
+    tactical = attrs.get('tactical', 60)
+    q = player.get('rating', 70) / 85  # quality factor
+    
+    comps = season_stats.get('competitions', {})
+    combined = season_stats.get('combined', {})
+    total_apps = combined.get('appearances', 0)
+    total_goals = combined.get('goals', 0)
+    
+    if total_apps == 0:
+        return
+    
+    # Estimate assists per competition (based on passing ability)
+    # Top creators: ~0.3 assists/game, average: ~0.1
+    if pos == 'FW':
+        assist_rate = (passing / 100) * 0.18 * q
+    elif pos == 'MF':
+        assist_rate = (passing / 100) * 0.28 * q
+    elif pos == 'DF':
+        assist_rate = (passing / 100) * 0.08 * q
+    else:  # GK
+        assist_rate = 0.01
+    
+    # xG: slightly above actual goals for clinical finishers, below for wasteful
+    xg_factor = 0.85 + (dribbling / 100) * 0.3  # 0.85 to 1.15
+    
+    # xA: based on key passes proxy from passing stat
+    xa_factor = 0.75 + (passing / 100) * 0.5  # 0.75 to 1.25
+    
+    # Yellow cards: based on physicality and tactical
+    yc_rate = max(0.02, (physicality / 100) * 0.12 - (tactical / 100) * 0.04)
+    rc_rate = yc_rate * 0.05  # ~5% of yellows become reds
+    
+    total_assists = 0
+    total_xg = 0.0
+    total_xa = 0.0
+    total_yc = 0
+    total_rc = 0
+    
+    for comp_name, stats in comps.items():
+        apps = stats.get('appearances', 0)
+        goals = stats.get('goals', 0)
+        
+        assists = max(0, round(apps * assist_rate + rng.uniform(-1, 1)))
+        xg = round(goals * xg_factor + rng.uniform(-0.5, 0.5), 1)
+        xa = round(assists * xa_factor + rng.uniform(-0.3, 0.3), 1)
+        yc = max(0, round(apps * yc_rate + rng.uniform(-0.5, 0.5)))
+        rc = 1 if rng.random() < (apps * rc_rate) else 0
+        
+        stats['assists'] = assists
+        stats['xG'] = max(0, xg)
+        stats['xA'] = max(0, xa)
+        stats['yellow_cards'] = yc
+        stats['red_cards'] = rc
+        
+        total_assists += assists
+        total_xg += max(0, xg)
+        total_xa += max(0, xa)
+        total_yc += yc
+        total_rc += rc
+    
+    combined['assists'] = total_assists
+    combined['xG'] = round(total_xg, 1)
+    combined['xA'] = round(total_xa, 1)
+    combined['yellow_cards'] = total_yc
+    combined['red_cards'] = total_rc
+
+
+def sync_general_with_wiki(player, season_stats):
+    """Sync the legacy general field with seasonStats combined data."""
+    combined = season_stats.get('combined', {})
+    if not combined:
+        return
+    
+    gen = player.get('general', {})
+    gen['apps'] = combined.get('appearances', gen.get('apps', 0))
+    gen['goals'] = combined.get('goals', gen.get('goals', 0))
+    gen['assists'] = combined.get('assists', gen.get('assists', 0))
+    gen['mins'] = combined.get('minutes', gen.get('mins', 0))
+    gen['yellowCards'] = combined.get('yellow_cards', gen.get('yellowCards', 0))
+    gen['redCards'] = combined.get('red_cards', gen.get('redCards', 0))
+    player['general'] = gen
+
+
 def main():
     print("=" * 60)
     print("  Merging Wikipedia Stats into data.js")
@@ -326,15 +418,20 @@ def main():
         wiki = wiki_stats.get(name, {})
         
         if wiki and not wiki.get('error') and wiki.get('club_career'):
-            # Use Wikipedia data
             season_stats = build_season_stats_from_wiki(player, wiki)
             if season_stats:
                 player['seasonStats'] = season_stats
+                # Enrich with estimated assists, xG, xA
+                enrich_advanced_stats(player, season_stats)
+                # Sync general with wikipedia combined
+                sync_general_with_wiki(player, season_stats)
                 from_wiki += 1
                 continue
         
         # Fallback to algorithmic
         player['seasonStats'] = generate_fallback_stats(player)
+        enrich_advanced_stats(player, player['seasonStats'])
+        sync_general_with_wiki(player, player['seasonStats'])
         from_fallback += 1
     
     print(f"\nFrom Wikipedia: {from_wiki}")
