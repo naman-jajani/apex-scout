@@ -1301,15 +1301,19 @@ const COMP_ICONS = {
   'Supercoppa Italiana': '🏟️', 'DFL-Supercup': '🏟️',
   'Trophée des Champions': '🏟️', 'Supertaça': '🏟️',
   'Community Shield': '🏟️',
+  'National Cup': '🏟️', 'League Cup': '🏟️',
+  'Continental': '🏆',
+  'International': '🌍',
+  'Other': '📋',
   'World Cup 2026': '🌍', 'UEFA Nations League': '🇪🇺',
   'Copa América': '🌎', 'AFCON 2025': '🌍',
 };
 
 const COMP_CATEGORIES = {
   league: ['Premier League', 'La Liga', 'Bundesliga', 'Serie A', 'Ligue 1', 'Primeira Liga', 'Brasileirão', 'Argentine Primera'],
-  continental: ['Champions League', 'Europa League', 'Conference League', 'Copa Libertadores', 'Copa Sudamericana'],
-  cup: ['FA Cup', 'EFL Cup', 'Copa del Rey', 'DFB-Pokal', 'Coppa Italia', 'Coupe de France', 'Copa do Brasil', 'Copa Argentina', 'Taça de Portugal', 'Supercopa de España', 'Supercoppa Italiana', 'DFL-Supercup', 'Trophée des Champions', 'Supertaça', 'Community Shield'],
-  intl: ['World Cup 2026', 'UEFA Nations League', 'Copa América', 'AFCON 2025'],
+  continental: ['Champions League', 'Europa League', 'Conference League', 'Copa Libertadores', 'Copa Sudamericana', 'Continental'],
+  cup: ['FA Cup', 'EFL Cup', 'Copa del Rey', 'DFB-Pokal', 'Coppa Italia', 'Coupe de France', 'Copa do Brasil', 'Copa Argentina', 'Taça de Portugal', 'Supercopa de España', 'Supercoppa Italiana', 'DFL-Supercup', 'Trophée des Champions', 'Supertaça', 'Community Shield', 'National Cup', 'League Cup'],
+  intl: ['World Cup 2026', 'UEFA Nations League', 'Copa América', 'AFCON 2025', 'International'],
 };
 
 function getCompCategory(compName) {
@@ -1329,6 +1333,20 @@ function renderSeasonStats(player) {
     return;
   }
   panel.style.display = '';
+  
+  // Show data source badge
+  const srcBadge = panel.querySelector('.stats-source-badge');
+  if (srcBadge) srcBadge.remove();
+  const badge = document.createElement('span');
+  badge.className = 'stats-source-badge';
+  if (ss.source === 'wikipedia') {
+    badge.innerHTML = '📖 Source: <strong>Wikipedia</strong> (Verified)';
+    badge.style.cssText = 'font-size:0.65rem;color:var(--accent-emerald);opacity:0.8;float:right;margin-top:-1.5rem;';
+  } else {
+    badge.innerHTML = '📊 Source: <em>Estimated</em>';
+    badge.style.cssText = 'font-size:0.65rem;color:var(--text-dim);opacity:0.6;float:right;margin-top:-1.5rem;';
+  }
+  panel.prepend(badge);
   
   const comps = ss.competitions;
   const combined = ss.combined || {};

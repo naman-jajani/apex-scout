@@ -5,3 +5,7 @@ test_groq.py
 .DS_Store
 *.pyc
 __pycache__/
+scraper/wiki_progress.json
+scraper/wiki_stats.json
+scraper/raw_*.json
+scraper/fotmob_*.json
