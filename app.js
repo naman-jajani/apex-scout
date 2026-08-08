@@ -460,10 +460,16 @@ window.addEventListener("DOMContentLoaded", () => {
   if (countSpan) countSpan.textContent = `${PLAYER_DATABASE.length} Players · ${leagues.size} Leagues`;
   
   // Update data coverage counters
+  const smWikiCount = PLAYER_DATABASE.filter(p => p.seasonStats && p.seasonStats.source === 'statmuse+wikipedia').length;
+  const smCount = PLAYER_DATABASE.filter(p => p.seasonStats && p.seasonStats.source === 'statmuse').length;
   const wikiCount = PLAYER_DATABASE.filter(p => p.seasonStats && p.seasonStats.source === 'wikipedia').length;
-  const estCount = PLAYER_DATABASE.length - wikiCount;
+  const estCount = PLAYER_DATABASE.filter(p => p.seasonStats && p.seasonStats.source === 'generated').length;
+  const smWikiSpan = document.getElementById('smWikiCountSpan');
+  const smSpan = document.getElementById('smCountSpan');
   const wikiSpan = document.getElementById('wikiCountSpan');
   const estSpan = document.getElementById('estCountSpan');
+  if (smWikiSpan) smWikiSpan.textContent = smWikiCount;
+  if (smSpan) smSpan.textContent = smCount;
   if (wikiSpan) wikiSpan.textContent = wikiCount;
   if (estSpan) estSpan.textContent = estCount;
   
@@ -781,13 +787,19 @@ function renderPlayers() {
     
     const ss = item.seasonStats || {};
     const ssCombi = ss.combined || {};
-    const isWiki = ss.source === 'wikipedia';
-    const displayApps = isWiki ? (ssCombi.appearances || 0) : item.general.apps;
-    const displayGoals = isWiki ? (ssCombi.goals || 0) : item.general.goals;
-    const displayAssists = isWiki ? (ssCombi.assists || 0) : item.general.assists;
-    const srcTag = isWiki 
-      ? '<span class="data-src-tag wiki" title="Real stats from Wikipedia">📖 Wiki</span>'
-      : '<span class="data-src-tag est" title="Estimated / simulated stats">📊 Est.</span>';
+    const source = ss.source || 'generated';
+    const displayApps = (source !== 'generated') ? (ssCombi.appearances || 0) : item.general.apps;
+    const displayGoals = (source !== 'generated') ? (ssCombi.goals || 0) : item.general.goals;
+    const displayAssists = (source !== 'generated') ? (ssCombi.assists || 0) : item.general.assists;
+    
+    let srcTag = '<span class="data-src-tag est" title="Estimated / simulated stats">📊 Est.</span>';
+    if (source === 'statmuse+wikipedia') {
+        srcTag = '<span class="data-src-tag sm-wiki" title="Stats from Statmuse & Wikipedia">📉 SM+Wiki</span>';
+    } else if (source === 'statmuse') {
+        srcTag = '<span class="data-src-tag sm" title="Stats from Statmuse">📉 SM</span>';
+    } else if (source === 'wikipedia') {
+        srcTag = '<span class="data-src-tag wiki" title="Real stats from Wikipedia">📖 Wiki</span>';
+    }
     
     card.innerHTML = `
       ${fitBadgeHtml}
@@ -1357,8 +1369,14 @@ function renderSeasonStats(player) {
   if (srcBadge) srcBadge.remove();
   const badge = document.createElement('span');
   badge.className = 'stats-source-badge';
-  if (ss.source === 'wikipedia') {
-    badge.innerHTML = '📖 Source: <strong>Wikipedia</strong> (Verified)';
+  if (ss.source === 'statmuse+wikipedia') {
+    badge.innerHTML = '📉 Source: <strong>Statmuse + Wikipedia</strong> (Real)';
+    badge.style.cssText = 'font-size:0.65rem;color:var(--accent-emerald);opacity:0.8;float:right;margin-top:-1.5rem;';
+  } else if (ss.source === 'statmuse') {
+    badge.innerHTML = '📉 Source: <strong>Statmuse</strong> (Real)';
+    badge.style.cssText = 'font-size:0.65rem;color:var(--accent-emerald);opacity:0.8;float:right;margin-top:-1.5rem;';
+  } else if (ss.source === 'wikipedia') {
+    badge.innerHTML = '📖 Source: <strong>Wikipedia</strong> (Real)';
     badge.style.cssText = 'font-size:0.65rem;color:var(--accent-emerald);opacity:0.8;float:right;margin-top:-1.5rem;';
   } else {
     badge.innerHTML = '📊 Source: <em>Estimated</em>';
