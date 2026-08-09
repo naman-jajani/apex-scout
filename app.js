@@ -1045,8 +1045,8 @@ async function sendUserChatMessage() {
       chatConversationHistory.push({ role: 'assistant', content: responseText });
 
       // Check for embedded shortlist data
-      const shortlistMatch = responseText.match(/\|\|\|SHORTLIST\|\|\|(.*?)\|\|\|END\|\|\|/);
-      let cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|.*?\|\|\|END\|\|\|/g, '').trim();
+      const shortlistMatch = responseText.match(/\|\|\|SHORTLIST\|\|\|([\s\S]*?)\|\|\|END\|\|\|/);
+      let cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, '').trim();
 
       if (shortlistMatch) {
         try {
