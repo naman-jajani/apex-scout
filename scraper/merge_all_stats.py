@@ -123,41 +123,72 @@ def enrich_with_statmuse(player, comps, sm):
     real_fouls = adv.get('fouls', 0)
     real_touches = adv.get('touches', 0)
 
-    # Distribute assists/xG/xA proportionally across competitions
-    total_apps = sum(c.get('appearances', 0) for c in comps.values())
-    if total_apps == 0:
-        total_apps = 1
+    # Calculate per-game rates from Statmuse (which usually only provides domestic league stats)
+    # We will use these rates to extrapolate advanced stats across all competitions from Wikipedia.
+    rate_assists = real_assists / real_matches if real_matches > 0 else 0
+    rate_xg = real_xg / real_matches if real_matches > 0 else 0
+    rate_xa = real_xa / real_matches if real_matches > 0 else 0
+    rate_yc = real_yc / real_matches if real_matches > 0 else 0
+    rate_rc = real_rc / real_matches if real_matches > 0 else 0
+    rate_mins = real_minutes / real_matches if real_matches > 0 else 78
+    rate_starts = real_starts / real_matches if real_matches > 0 else 0.9
+    rate_shots = real_shots / real_matches if real_matches > 0 else 0
+    rate_sot = real_sot / real_matches if real_matches > 0 else 0
+
+    total_apps = 0
+    total_goals = 0
+    total_assists = 0
+    total_xg = 0.0
+    total_xa = 0.0
+    total_yc = 0
+    total_rc = 0
+    total_mins = 0
+    total_starts = 0
+    total_shots = 0
+    total_sot = 0
 
     for comp_name, stats in comps.items():
         apps = stats.get('appearances', 0)
         goals = stats.get('goals', 0)
-        ratio = apps / total_apps if total_apps > 0 else 0
-
-        stats['assists'] = max(0, round(real_assists * ratio))
-        stats['xG'] = round(real_xg * ratio, 1) if real_xg else round(goals * 1.05, 1)
-        stats['xA'] = round(real_xa * ratio, 1) if real_xa else 0
-        stats['yellow_cards'] = max(0, round(real_yc * ratio))
-        stats['red_cards'] = max(0, round(real_rc * ratio))
+        
+        # Extrapolate using the per-game rates
+        stats['assists'] = max(0, round(apps * rate_assists))
+        stats['xG'] = round(apps * rate_xg, 1) if real_xg else round(goals * 1.05, 1)
+        stats['xA'] = round(apps * rate_xa, 1) if real_xa else 0
+        stats['yellow_cards'] = max(0, round(apps * rate_yc))
+        stats['red_cards'] = max(0, round(apps * rate_rc))
         stats['rating'] = real_rating if real_rating else 0
-        stats['minutes'] = round(real_minutes * ratio) if real_minutes else apps * 78
-        stats['started'] = round(real_starts * ratio) if real_starts else max(1, apps - 2)
-        stats['shots'] = round(real_shots * ratio) if real_shots else 0
-        stats['shots_on_target'] = round(real_sot * ratio) if real_sot else 0
+        stats['minutes'] = round(apps * rate_mins)
+        stats['started'] = round(apps * rate_starts)
+        stats['shots'] = round(apps * rate_shots)
+        stats['shots_on_target'] = round(apps * rate_sot)
+        
+        total_apps += apps
+        total_goals += goals
+        total_assists += stats['assists']
+        total_xg += stats['xG']
+        total_xa += stats['xA']
+        total_yc += stats['yellow_cards']
+        total_rc += stats['red_cards']
+        total_mins += stats['minutes']
+        total_starts += stats['started']
+        total_shots += stats['shots']
+        total_sot += stats['shots_on_target']
 
-    # Build combined
+    # Build combined global stats (summing over all competitions)
     combined = {
-        'appearances': real_matches if real_matches else total_apps,
-        'goals': real_goals if real_goals else sum(c.get('goals', 0) for c in comps.values()),
-        'assists': real_assists,
-        'minutes': real_minutes if real_minutes else sum(c.get('minutes', 0) for c in comps.values()),
-        'started': real_starts if real_starts else sum(c.get('started', 0) for c in comps.values()),
-        'xG': real_xg,
-        'xA': real_xa,
-        'yellow_cards': real_yc,
-        'red_cards': real_rc,
+        'appearances': total_apps,
+        'goals': total_goals,
+        'assists': total_assists,
+        'minutes': total_mins,
+        'started': total_starts,
+        'xG': round(total_xg, 1),
+        'xA': round(total_xa, 1),
+        'yellow_cards': total_yc,
+        'red_cards': total_rc,
         'rating': real_rating,
-        'shots': real_shots,
-        'shots_on_target': real_sot,
+        'shots': total_shots,
+        'shots_on_target': total_sot,
     }
 
     # Defense stats
