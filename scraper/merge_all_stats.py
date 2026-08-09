@@ -151,6 +151,13 @@ def enrich_with_statmuse(player, comps, sm):
         apps = stats.get('appearances', 0)
         goals = stats.get('goals', 0)
         
+        # Determine minutes for this competition
+        # Statmuse rate_mins is purely from the domestic league. 
+        # If they are a sub in the league (low average mins), we shouldn't necessarily penalize 
+        # their cup minutes just as heavily, otherwise their goals/90 becomes insanely high.
+        is_league = (apps == real_matches)
+        comp_rate_mins = rate_mins if is_league else max(rate_mins, 65)
+        
         # Extrapolate using the per-game rates
         stats['assists'] = max(0, round(apps * rate_assists))
         stats['xG'] = round(apps * rate_xg, 1) if real_xg else round(goals * 1.05, 1)
@@ -158,7 +165,7 @@ def enrich_with_statmuse(player, comps, sm):
         stats['yellow_cards'] = max(0, round(apps * rate_yc))
         stats['red_cards'] = max(0, round(apps * rate_rc))
         stats['rating'] = real_rating if real_rating else 0
-        stats['minutes'] = round(apps * rate_mins)
+        stats['minutes'] = round(apps * comp_rate_mins)
         stats['started'] = round(apps * rate_starts)
         stats['shots'] = round(apps * rate_shots)
         stats['shots_on_target'] = round(apps * rate_sot)
