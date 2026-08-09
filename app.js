@@ -1046,7 +1046,8 @@ async function sendUserChatMessage() {
 
       // Check for embedded shortlist data
       const shortlistMatch = responseText.match(/\|\|\|SHORTLIST\|\|\|([\s\S]*?)\|\|\|END\|\|\|/);
-      let cleanText = responseText;
+      let cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, '').trim();
+      let extraHtml = '';
 
       if (shortlistMatch) {
         try {
@@ -1075,17 +1076,16 @@ async function sendUserChatMessage() {
           });
           shortlistHtml += '</ul></div>';
           
-          cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, shortlistHtml).trim();
+          extraHtml = shortlistHtml;
           
         } catch (e) {
           // If parse fails, just strip the tokens
-          cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, '').trim();
         }
       }
 
       const botMsg = document.createElement('div');
       botMsg.className = 'chat-msg bot';
-      botMsg.innerHTML = `<div class="chat-bubble">${formatScoutMessage(cleanText)}</div>`;
+      botMsg.innerHTML = `<div class="chat-bubble">${formatScoutMessage(cleanText)}${extraHtml}</div>`;
       chatHistory.appendChild(botMsg);
 
     } catch (err) {
