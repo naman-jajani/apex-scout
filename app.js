@@ -348,20 +348,42 @@ function buildRAGContext(scoredPlayers, query) {
       strengths: (p.strengths || []).slice(0, 3),
       weaknesses: (p.weaknesses || []).slice(0, 2),
     };
-    // Add position-relevant stats only
+    // Add position-relevant stats using real data where available
+    const c = p.seasonStats && p.seasonStats.combined ? p.seasonStats.combined : {};
+    const mins = Math.max(1, c.minutes || 1000);
+    const p90 = (val) => val != null ? Math.round((val / mins) * 90 * 100) / 100 : 0;
+    
     if (p.position === 'GK') {
-      profile.stats = { savePerc: ds.savePercentage, cs: ds.cleanSheets, passAcc: ds.passingAccuracy };
+      profile.stats = { savePerc: ds.savePercentage, cs: ds.cleanSheets, passAcc: ds.passingAccuracy, rating: c.rating };
     } else if (p.position === 'DF') {
-      profile.stats = { tw90: ds.tacklesWonPer90, int90: ds.interceptionsPer90, passAcc: ds.passingAccuracy, prog90: ds.progressivePassesPer90 };
+      profile.stats = { 
+        tkl90: c.tackles != null ? p90(c.tackles) : ds.tacklesWonPer90, 
+        int90: c.interceptions != null ? p90(c.interceptions) : ds.interceptionsPer90, 
+        passAcc: ds.passingAccuracy, prog90: ds.progressivePassesPer90,
+        rating: c.rating
+      };
     } else if (p.position === 'FW') {
-      profile.stats = { g90: ds.goalsPer90, xG: ds.expectedGoals, kp90: ds.keyPassesPer90, drib90: ds.dribblesCompletedPer90 };
+      profile.stats = { 
+        g90: c.goals != null ? p90(c.goals) : ds.goalsPer90, 
+        xG90: c.xG != null ? p90(c.xG) : ds.expectedGoals,
+        a90: c.assists != null ? p90(c.assists) : 0,
+        xA90: c.xA != null ? p90(c.xA) : 0,
+        kp90: ds.keyPassesPer90, drib90: ds.dribblesCompletedPer90,
+        rating: c.rating
+      };
     } else {
-      profile.stats = { kp90: ds.keyPassesPer90, prog90: ds.progressivePassesPer90, passAcc: ds.passingAccuracy, drib90: ds.dribblesCompletedPer90, tw90: ds.tacklesWonPer90 };
+      profile.stats = { 
+        a90: c.assists != null ? p90(c.assists) : 0,
+        xA90: c.xA != null ? p90(c.xA) : 0,
+        g90: c.goals != null ? p90(c.goals) : 0,
+        kp90: ds.keyPassesPer90, prog90: ds.progressivePassesPer90, passAcc: ds.passingAccuracy, drib90: ds.dribblesCompletedPer90, 
+        tkl90: c.tackles != null ? p90(c.tackles) : ds.tacklesWonPer90,
+        rating: c.rating
+      };
     }
     // Add season stats summary (25/26)
     if (p.seasonStats && p.seasonStats.combined) {
-      const c = p.seasonStats.combined;
-      profile.season = { apps: c.appearances, g: c.goals, a: c.assists, mins: c.minutes, rating: c.avg_rating, comps: Object.keys(p.seasonStats.competitions || {}).length };
+      profile.season = { apps: c.appearances, g: c.goals, a: c.assists, mins: c.minutes, rating: c.rating, source: p.seasonStats.source };
     }
     return profile;
   });
@@ -1751,56 +1773,47 @@ function drawHeatmap(playerA, playerB) {
 
 // Helper to calculate dynamic tactical metrics based on position
 function getTacticalMetricsForPosition(player, pos) {
-  const stats = player.detailedStats || {};
-  const apps = player.general?.apps || 1;
+  const bench = player.leagueBenchmarks || [];
+  
+  const getBench = (metricName) => {
+    const b = bench.find(b => b.metric === metricName);
+    if (!b) return { val: 0, pct: 50 };
+    
+    let pct = 50;
+    if (b.elite > b.avg) {
+       pct = 50 + ((b.player - b.avg) / (b.elite - b.avg)) * 45;
+    } else if (b.avg > b.elite) {
+       pct = 50 + ((b.avg - b.player) / (b.avg - b.elite)) * 45;
+    }
+    pct = Math.max(0, Math.min(100, pct));
+    return { val: b.player, pct: pct };
+  };
+
+  const goals = getBench("Goals per 90");
+  const xg = getBench("Expected Goals (xG) per 90");
+  const assists = getBench("Assists per 90");
+  const xa = getBench("Expected Assists (xA) per 90");
+  const tackles = getBench("Tackles Won per 90");
+  const rating = getBench("Average Match Rating");
+
   let labels = [];
   let values = [];
+  let rawValues = [];
   
   if (pos === 'GK') {
-    labels = ['Save %', 'Clean Sheet Rate', 'PSxG Prevented', 'Distribution %', 'Sweeper Actions', 'Claim Distance'];
-    values = [
-      stats.savePercentage || player.attributes?.defending || 70,
-      ((stats.cleanSheets || 0) / apps) * 150,
-      50 + ((stats.psxgDifference || 0) * 5),
-      stats.passingAccuracy || player.attributes?.passing || 70,
-      (stats.sweeperActionsPer90 || 0) * 60,
-      (stats.averageDistanceOfSweeperActions || 0) * 5
-    ];
-  } else if (pos === 'DF') {
-    labels = ['Tackles p90', 'Interceptions p90', 'Clearances p90', 'Aerial Duel Win %', '1v1 Tackled Rate', 'Passing Accuracy'];
-    values = [
-      (stats.tacklesWonPer90 || 0) * 22,
-      (stats.interceptionsPer90 || 0) * 45,
-      (stats.clearancesPer90 || 0) * 12,
-      stats.aerialDuelWinPercentage || player.attributes?.defending || 70,
-      stats.tackledDribblerRate || player.attributes?.tactical || 70,
-      stats.passingAccuracy || player.attributes?.passing || 70
-    ];
-  } else if (pos === 'MF') {
-    labels = ['Key Passes p90', 'Prog. Passes p90', 'Passing Accuracy', 'Chances Created', 'Ball Recoveries', 'Tackles p90'];
-    values = [
-      (stats.keyPassesPer90 || 0) * 45,
-      (stats.progressivePassesPer90 || 0) * 8,
-      stats.passingAccuracy || player.attributes?.passing || 70,
-      ((stats.chancesCreated || 0) / apps) * 20,
-      (stats.ballRecoveriesPer90 || 0) * 10,
-      (stats.tacklesWonPer90 || 0) * 22
-    ];
-  } else { // FW
-    labels = ['Goals p90', 'Expected Goals (xG)', 'Shot Conversion %', 'Chances Created', 'Dribbles Completed', 'Touches in Box'];
-    values = [
-      (stats.goalsPer90 || 0) * 150,
-      ((stats.expectedGoals || 0) / apps) * 150,
-      (stats.shotConversionRate || 0) * 3,
-      ((stats.chancesCreated || 0) / apps) * 20,
-      (stats.dribblesCompletedPer90 || 0) * 25,
-      (stats.touchesInBoxPer90 || 0) * 15
-    ];
+    labels = ['Match Rating', 'Save % (Data N/A)', 'Clean Sheets (Data N/A)', 'Pass Acc (Data N/A)', 'Sweeper (Data N/A)', 'Crosses (Data N/A)'];
+    values = [rating.pct, rating.pct, rating.pct, rating.pct, rating.pct, rating.pct];
+    rawValues = [rating.val, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A'];
+  } else {
+    labels = ['Goals p90', 'xG p90', 'Assists p90', 'xA p90', 'Tackles p90', 'Match Rating'];
+    values = [goals.pct, xg.pct, assists.pct, xa.pct, tackles.pct, rating.pct];
+    rawValues = [goals.val, xg.val, assists.val, xa.val, tackles.val, rating.val];
   }
   
   return {
     labels,
-    values: values.map(v => Math.max(0, Math.min(100, Math.round(v))))
+    values: values.map(v => Math.round(v)),
+    rawValues
   };
 }
 
@@ -1818,6 +1831,7 @@ function renderRadarChart(playerA, playerB) {
   const datasets = [{
     label: playerA.name,
     data: metricsA.values,
+    rawValues: metricsA.rawValues,
     backgroundColor: 'rgba(16, 185, 129, 0.15)',
     borderColor: '#10b981',
     borderWidth: 2,
@@ -1834,6 +1848,7 @@ function renderRadarChart(playerA, playerB) {
     datasets.push({
       label: playerB.name,
       data: metricsB.values,
+      rawValues: metricsB.rawValues,
       backgroundColor: 'rgba(6, 182, 212, 0.15)',
       borderColor: '#06b6d4',
       borderWidth: 2,
@@ -1879,7 +1894,8 @@ function renderRadarChart(playerA, playerB) {
       tooltip: {
         callbacks: {
           label: function(context) {
-            return `${context.dataset.label} - ${context.label}: ${context.raw}/100`;
+            const raw = context.dataset.rawValues[context.dataIndex];
+            return `${context.dataset.label} - ${context.label}: ${raw}`;
           }
         }
       }
