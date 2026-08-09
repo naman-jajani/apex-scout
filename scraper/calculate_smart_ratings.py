@@ -151,6 +151,31 @@ def process_players(players, baselines):
         p['rating'] = final_rating_int
         p['attributes'] = new_attrs
 
+        # Overwrite the old simulated leagueBenchmarks with real per-90 metrics compared to positional peers
+        p['leagueBenchmarks'] = [
+            {'metric': 'Goals per 90', 'player': round(g90, 2), 'avg': round(b['g90']['mu'], 2), 'elite': round(b['g90']['mu'] + 1.5*b['g90']['sig'], 2)},
+            {'metric': 'Expected Goals (xG) per 90', 'player': round(xg90, 2), 'avg': round(b['xg90']['mu'], 2), 'elite': round(b['xg90']['mu'] + 1.5*b['xg90']['sig'], 2)},
+            {'metric': 'Assists per 90', 'player': round(a90, 2), 'avg': round(b['a90']['mu'], 2), 'elite': round(b['a90']['mu'] + 1.5*b['a90']['sig'], 2)},
+            {'metric': 'Expected Assists (xA) per 90', 'player': round(xa90, 2), 'avg': round(b['xa90']['mu'], 2), 'elite': round(b['xa90']['mu'] + 1.5*b['xa90']['sig'], 2)},
+            {'metric': 'Tackles Won per 90', 'player': round(tkl90, 2), 'avg': round(b['tkl90']['mu'], 2), 'elite': round(b['tkl90']['mu'] + 1.5*b['tkl90']['sig'], 2)},
+            {'metric': 'Average Match Rating', 'player': round(rating, 2), 'avg': round(b['rating']['mu'], 2), 'elite': round(b['rating']['mu'] + 1.5*b['rating']['sig'], 2)},
+        ]
+        
+        # Overwrite the old simulated detailedStats with real metrics where we have them
+        ds_old = p.get('detailedStats', {})
+        p['detailedStats'] = {
+            'goalsPer90': round(g90, 2),
+            'expectedGoals': round(xg90, 2),
+            'tacklesWonPer90': round(tkl90, 2),
+            'passingAccuracy': ds_old.get('passingAccuracy', 80),
+            'keyPassesPer90': round(xa90 * 2.5, 2), # Approximated from real xA
+            'dribblesCompletedPer90': ds_old.get('dribblesCompletedPer90', 2.0),
+            'interceptionsPer90': ds_old.get('interceptionsPer90', 1.0),
+            'progressivePassesPer90': ds_old.get('progressivePassesPer90', 3.0),
+            'cleanSheets': ds_old.get('cleanSheets', 5),
+            'savePercentage': ds_old.get('savePercentage', 70),
+        }
+
         # Keep original for debugging/logging
         p['_old_rating'] = old_rating
         p['_stats_rating'] = stats_rating
