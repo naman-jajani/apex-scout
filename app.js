@@ -1046,7 +1046,7 @@ async function sendUserChatMessage() {
 
       // Check for embedded shortlist data
       const shortlistMatch = responseText.match(/\|\|\|SHORTLIST\|\|\|([\s\S]*?)\|\|\|END\|\|\|/);
-      let cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, '').trim();
+      let cleanText = responseText;
 
       if (shortlistMatch) {
         try {
@@ -1055,12 +1055,32 @@ async function sendUserChatMessage() {
             const player = PLAYER_DATABASE.find(p => p.id === item.id || p.name === item.name);
             return player ? { player, matchScore: item.matchScore || 80, rationale: 'Recommended by AI Scout' } : null;
           }).filter(Boolean);
+          
           if (activeAISearchResult.length > 0) {
             sortByMatchOption.style.display = 'block';
             sortBy.value = 'matchScore';
             renderPlayers();
           }
-        } catch (e) { /* ignore parse errors in shortlist */ }
+          
+          // Format a beautiful HTML list to embed in the chat
+          let shortlistHtml = '<div class="chat-shortlist" style="margin-top: 1rem; border: 1px solid var(--border-glass); border-radius: 8px; background: rgba(0,0,0,0.2); padding: 0.8rem;">';
+          shortlistHtml += '<h4 style="margin-bottom: 0.5rem; color: var(--accent-cyan); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">📋 Recommended Players</h4>';
+          shortlistHtml += '<ul style="list-style: none; padding: 0; margin: 0;">';
+          
+          shortlistData.forEach(item => {
+            shortlistHtml += `<li style="padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; font-size: 0.85rem;">
+              <span style="font-weight: 600; color: var(--text-main);">${item.name}</span>
+              <span style="color: var(--accent-emerald);">🎯 ${item.matchScore}% Match</span>
+            </li>`;
+          });
+          shortlistHtml += '</ul></div>';
+          
+          cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, shortlistHtml).trim();
+          
+        } catch (e) {
+          // If parse fails, just strip the tokens
+          cleanText = responseText.replace(/\|\|\|SHORTLIST\|\|\|[\s\S]*?\|\|\|END\|\|\|/g, '').trim();
+        }
       }
 
       const botMsg = document.createElement('div');
